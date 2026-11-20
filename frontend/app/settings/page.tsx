@@ -62,7 +62,6 @@ export default function SettingsPage() {
       setSaved(data); setValues(data); setSecrets({}); setMessage("Settings saved. New provider calls use these settings without a restart.");
     } catch {
       setError("Settings could not be saved. Check the fields and HTTP(S) URLs, then retry.");
-      setSecrets({});
     } finally { setBusy(false); }
   }
 
