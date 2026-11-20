@@ -1,6 +1,7 @@
 import argparse
 import logging
 import signal
+import sys
 import time
 from threading import Event, Thread
 from datetime import datetime, timedelta, timezone
@@ -9,6 +10,8 @@ from sqlalchemy import func, select, text
 
 from seoci.config import settings
 from seoci.db import Session, init_db
+from seoci.diagnostics import classify, context, events, persist_events, protect_logging, record_event
+from seoci.app_settings import resolve_settings
 from seoci.models import AuditEvent, Job, WorkflowRun, now
 from seoci.pipeline.graph import execute
 from seoci.pipeline.state import transition
@@ -67,27 +70,40 @@ def work_once():
     stopped = Event()
     monitor = Thread(target=heartbeat, args=(job_id, stopped), daemon=True)
     monitor.start()
+    protect_logging(resolve_settings().values)
+    event_token = events.set([])
+    context_token = context.set({"run_id": run_id, "attempt": job.attempts, "stage": "job"})
+    record_event(message="Job started")
     try:
         execute(run_id, payload)
         with Session() as db:
             job = db.get(Job, job_id)
             job.status, job.error = "done", None
             db.commit()
+        record_event(message="Job completed")
     except Exception as exc:
-        log.exception("Run %s failed", run_id)
+        error = {**classify(exc), "timestamp": now(), "attempt": job.attempts}
+        error.setdefault("stage", "job")
+        record_event(level="error", message=error["message"], error=error, provider=error["provider"], model=error["model"], status=error["status"])
         with Session() as db:
             job = db.get(Job, job_id)
-            job.status, job.error = "failed", str(exc)
+            job.status, job.error = "failed", error["message"]
+            job.error_details = error
             run = db.get(WorkflowRun, run_id)
-            run.error = str(exc)
+            run.error = error["message"]
+            run.error_details = error
             if run.state not in {"cancelled", "exported", "failed", "blocked"}:
                 run.resume_state = run.state
-                transition(db, run, "failed", reason=str(exc))
-            db.add(AuditEvent(run_id=run_id, actor="system", action="job_error", data={"error": str(exc), "type": type(exc).__name__, "attempt": job.attempts}))
+                transition(db, run, "failed", reason=error["message"])
+            db.add(AuditEvent(run_id=run_id, actor="system", action="job_error", data=error))
             db.commit()
     finally:
         stopped.set()
         monitor.join()
+        pending = events.get()
+        events.reset(event_token)
+        context.reset(context_token)
+        persist_events(pending)
     return True
 
 
@@ -95,7 +111,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
     init_db()
     if args.once:
         work_once()

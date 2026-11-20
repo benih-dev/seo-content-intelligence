@@ -489,6 +489,22 @@ diduplikasi di sini. Schema tersedia pada `/openapi.json`. Untuk menjalankan sat
 job sebagai diagnosis: `(cd backend && uv run python -m seoci.worker --once)`.
 Retry/cancel dan inspeksi artefak tersedia melalui workbench dan API.
 
+### Diagnosis provider dan Logs
+
+Kegagalan provider menampilkan kategori, status HTTP (jika tersedia), tahap,
+waktu, percobaan, serta petunjuk perbaikan pada halaman run. Setelah memperbaiki
+Settings, gunakan **Retry run**. Tombol **Test connection** di Settings hanya
+menguji konfigurasi yang sudah disimpan; panggilan live dapat dikenakan biaya.
+Mode mock tetap offline. Halaman **Logs** memerlukan login dan menampilkan
+maksimal 500 event terbaru dari API maupun worker, dengan filter run dan level.
+Pesan diagnosis disensor dan tidak menyimpan respons/error mentah provider.
+Logging Python juga mengirim diagnosis tersensor ke stdout container;
+gunakan `docker compose logs worker api` untuk inspeksi.
+
+Pembaruan VPS cukup `git pull && docker compose up -d --build`: service API
+menjalankan `alembic upgrade head` (termasuk tabel diagnosis migrasi `0005`)
+sebelum sehat, lalu worker menggunakan database PostgreSQL yang sama.
+
 Batas MVP: otorisasi per pengguna/proyek, pembatasan egress, verifikasi fakta mendalam, reservasi biaya
 sebelum panggilan model, dan kebijakan retensi/backup lintas aplikasi/checkpoint
 masih perlu penguatan. Publishing GitHub bukan pengganti tanggung jawab editor.

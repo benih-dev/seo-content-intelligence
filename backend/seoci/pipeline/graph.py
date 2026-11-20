@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from seoci.config import settings
 from seoci.db import Session
+from seoci.diagnostics import context as diagnostic_context, classify, ProviderFailure, record_event
 from seoci.export import build_exports, render_md, row_dict, with_article_h1
 from seoci.models import (ApprovalEvent, ArticleDraft, AuditEvent, ContentBrief, EvidenceItem, KeywordMetricSnapshot,
                           Job, KeywordRecord, Project, QAReview, ResearchSource, SERPResult, SERPSnapshot,
@@ -79,6 +80,7 @@ def stage(name, fn, version_fn=lambda db, run: 1):
                 return {}
             start = time.monotonic()
             token = active_session.set(db)
+            diagnostic_token = diagnostic_context.set({**diagnostic_context.get(), "stage": name, "run_id": run.id})
             try:
                 data = fn(db, run) or {}
                 row = StageArtifact(run_id=run.id, stage=name, version=version, data=data)
@@ -88,7 +90,12 @@ def stage(name, fn, version_fn=lambda db, run: 1):
                 for job in db.scalars(select(Job).where(Job.run_id == run.id, Job.status == "running")):
                     job.heartbeat_at = now()
                 db.commit()
+                record_event(message="Stage completed", duration_ms=round((time.monotonic()-start)*1000))
+            except Exception as exc:
+                error = {**classify(exc), "stage": name}
+                raise ProviderFailure(error) from None
             finally:
+                diagnostic_context.reset(diagnostic_token)
                 active_session.reset(token)
                 usages = db.info.pop("llm_usage", [])
                 db.rollback()

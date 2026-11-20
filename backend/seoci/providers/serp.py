@@ -1,6 +1,7 @@
 from typing import Protocol
 
 from seoci.app_settings import resolve_settings
+from seoci.diagnostics import classify, ProviderFailure, observed
 from seoci.models import now
 from seoci.providers.demo_topics import topic_sources
 from seoci.providers.network import cached, dfs, dfs_location, request
@@ -40,6 +41,7 @@ class DataForSEOSerp:
 
 
 class SerperSerp:
+    @observed("Serper", endpoint="https://google.serper.dev")
     def search(self, query, locale, device="desktop"):
         language, country = locale.split("-", 1)
         def fetch():
@@ -58,8 +60,8 @@ class SerperSerp:
                 return {"query": query, "locale": locale, "device": device, "provider": "serper", "captured_at": now(),
                         "results": rows, "people_also_ask": data.get("peopleAlsoAsk", []),
                         "related_searches": data.get("relatedSearches", [])}
-            except Exception:
-                raise RuntimeError("Serper request failed; check provider settings and query") from None
+            except Exception as exc:
+                raise ProviderFailure(classify(exc, "Serper", endpoint="https://google.serper.dev")) from None
         return cached("serper-serp", query, locale, device, fetch)
 
 

@@ -9,6 +9,7 @@ from google.oauth2 import service_account
 
 from seoci.app_settings import resolve_settings
 from seoci.config import settings
+from seoci.diagnostics import classify, ProviderFailure, observed
 from seoci.models import now
 from seoci.providers.network import cached, request
 
@@ -16,6 +17,7 @@ SCOPE = "https://www.googleapis.com/auth/webmasters.readonly"
 
 
 class SearchConsoleKeywords:
+    @observed("Search Console", endpoint="https://www.googleapis.com")
     def rows(self, query=None):
         config = resolve_settings().values
         site = config["gsc_site_url"]
@@ -45,8 +47,8 @@ class SearchConsoleKeywords:
                 rows = response.get("rows", [])
                 rows = sorted(rows, key=lambda row: row.get("clicks", 0), reverse=True)
                 return {"rows": rows, "period": period}
-            except Exception:
-                raise RuntimeError("Search Console request failed; check credentials and property access") from None
+            except Exception as exc:
+                raise ProviderFailure(classify(exc, "Search Console", endpoint="https://www.googleapis.com")) from None
 
         identity = hashlib.sha256(raw.encode()).hexdigest()
         return cached("search-console", [site, identity, period, query], "own-site", "all", fetch)

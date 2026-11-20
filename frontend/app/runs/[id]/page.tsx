@@ -1,4 +1,5 @@
 "use client";
+import { RunError, RunErrorDetails } from "@/components/run-error";
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
@@ -70,7 +71,7 @@ export default function RunPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const [run, setRun] = useState<Run>();
+  const [run, setRun] = useState<Run & { error_details?: RunErrorDetails | null }>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState("keywords");
@@ -264,9 +265,7 @@ export default function RunPage({
             </span>
           </div>
           {run.error && (
-            <div className="notice error">
-              <strong>Run stopped:</strong> {run.error}
-            </div>
+            <RunError runId={run.id} message={run.error} details={run.error_details} />
           )}
           {run.state === "exported" && (
             <div className="export-success" role="status" aria-live="polite">
