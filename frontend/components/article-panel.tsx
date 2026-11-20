@@ -458,6 +458,7 @@ export function ArticlePanel({
                   onClick={() => {
                     setVersion(latest.version);
                     setBody(latest.body_md);
+                    setMode("preview");
                   }}
                 >
                   Review latest version
