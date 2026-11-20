@@ -68,7 +68,7 @@ export default function SettingsPage() {
   return (
     <div className="page narrow">
       <SectionTitle title="Settings" description="Configure the providers used by this workspace." />
-      <div className="notice warning">No login is enabled. Anyone who can reach this app can change provider settings. Keep access private.</div>
+      <div className="notice warning">All signed-in users can change provider settings. Only add trusted accounts and keep access private.</div>
       <p className="muted">Keys are stored in the app database in plaintext and are write-only in this interface: saved keys are never returned. Protect database files and backups. A saved value overrides the environment; clearing it restores the environment fallback.</p>
       <ErrorNotice error={error} />
       {!saved || !values ? (!error && <Loading />) : (

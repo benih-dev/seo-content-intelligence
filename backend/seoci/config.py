@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     worker_poll_seconds: float = 0.5
     github_token: str = ""
     github_api_url: str = "https://api.github.com"
+    auth_users_file: str = "./data/auth-users"
+    auth_secret: str = ""
 
 
 settings = Settings()

@@ -5,7 +5,7 @@ yang dapat ditelusuri sumbernya. Pipeline membantu riset, brief, penulisan, opti
 QA dan ekspor. **Manusia tetap menyetujui kata kunci, brief dan artikel akhir.**
 Hasil dapat diunduh atau dikirim sebagai pull request ke repositori blog GitHub.
 
-> MVP ini belum memiliki autentikasi/otorisasi dan ditujukan untuk satu operator.
+> MVP ini memakai login sederhana berbasis file lokal; semua akun memiliki akses penuh.
 > Jangan mengekspos API/workbench langsung ke internet. Gunakan jaringan privat atau
 > lapisan akses terautentikasi. Build produksi bukan jaminan aman untuk layanan publik.
 
@@ -121,7 +121,8 @@ development pada 3000. Hentikan dengan Ctrl+C. Jangan menyalakan dua stack pada
 port yang sama. Script frontend mengikat semua antarmuka; gunakan jaringan
 tepercaya atau firewall untuk membatasi akses.
 
-Di terminal lain, setelah API dan worker siap:
+Setelah API siap, buka **http://localhost:3000** dan buat akun admin pertama.
+Di terminal lain, setelah API dan worker siap (seed meminta username/password):
 
 ```sh
 make seed
@@ -144,7 +145,8 @@ docker compose config -q
 docker compose up --build
 ```
 
-Di terminal lain setelah API sehat dan worker siap:
+Setelah API sehat, buka **http://localhost:3000** untuk membuat admin pertama.
+Di terminal lain setelah worker siap (perintah berikut meminta username/password):
 
 ```sh
 docker compose exec api python seed.py
@@ -156,7 +158,9 @@ Compose menjalankan migrasi sebelum API, menunggu PostgreSQL sehat sebelum API,
 dan API sehat sebelum worker/web. API/web hanya dipublikasikan pada
 `127.0.0.1:8000` dan `127.0.0.1:3000`; PostgreSQL tidak membuka port host.
 Web dibangun dengan proxy internal `http://api:8000`. Database dan checkpoint
-bertahan di named volume `pgdata`.
+bertahan di named volume `pgdata`. File akun dan secret sesi otomatis bertahan di
+volume `authdata` yang dipasang pada `/app/data` di container API. Jangan hapus
+volume ini saat upgrade; `docker compose down -v` juga menghapus akun/secret.
 
 ```sh
 # Hentikan container tanpa menghapus volume
@@ -251,12 +255,54 @@ dikembalikan oleh API. `GET /api/settings` memberi nilai non-rahasia dan metadat
 field yang dihilangkan tidak berubah dan `null` menghapus override database.
 Audit hanya mencatat nama field yang berubah.
 
-**Penting:** aplikasi tidak memiliki login. Semua orang yang dapat mengaksesnya
-dapat mengganti konfigurasi. Batasi akses ke localhost/jaringan tepercaya atau
-gunakan lapisan autentikasi di depannya. Kunci disimpan sebagai plaintext di
+**Penting:** semua pengguna yang sudah login dapat mengganti konfigurasi.
+Tambahkan hanya akun tepercaya dan batasi akses jaringan. Kunci disimpan sebagai plaintext di
 database (bukan dienkripsi), sehingga file/volume database dan backup harus
 dilindungi. Write-only berarti kunci tidak ditampilkan kembali, bukan bahwa
 penyimpanan database terenkripsi.
+
+## Login dan akun lokal
+
+Pada kunjungan pertama, aplikasi mengarahkan ke `/setup` (**Create admin account**)
+jika file akun belum ada atau kosong. Buat username/password sendiri, lalu login
+di `/login`. Setup ditutup setelah akun pertama tersimpan; tidak ada password
+bawaan. Lakukan setup sebelum membuka akses jaringan. Semua akun mempunyai hak
+yang sama, termasuk pengaturan provider dan publishing; belum ada role/otorisasi
+per proyek atau pemulihan password melalui email.
+
+Tambahkan akun atau ganti password melalui terminal server, dari direktori backend:
+
+```sh
+cd backend
+uv run python -m seoci.auth add-user owner
+```
+
+CLI meminta password dua kali dengan `getpass` (bukan argumen command line).
+Untuk Compose: `docker compose exec api python -m seoci.auth add-user owner`.
+File `AUTH_USERS_FILE` berisi satu `username:pbkdf2_sha256$iterations$salt$hash`
+per baris, memakai PBKDF2-HMAC-SHA256 dengan salt acak dan 600.000 iterasi.
+Password minimal 8 karakter; username memakai huruf/angka, titik, underscore atau
+hyphen (maksimal 64 karakter). File ditulis atomik dengan permission `0600` dan
+lock lokal (POSIX/Linux). Perubahan file dibaca tanpa restart. Mengubah password
+atau menghapus baris akun membatalkan sesi akun tersebut. Jangan kosongkan/hapus
+file akun kecuali memang ingin membuka setup kembali. File rusak gagal tertutup.
+
+`AUTH_SECRET` menandatangani cookie sesi HttpOnly, SameSite=Lax, berlaku 7 hari.
+Jika kosong, API membuat secret acak di `<AUTH_USERS_FILE>.secret`, dengan permission
+`0600`; backup file ini bersama file akun. Rotasi secret membatalkan semua sesi.
+Logout menghapus cookie browser; salinan cookie yang dicuri tetap harus dicabut
+melalui penggantian password/secret. Gunakan HTTPS untuk deployment non-lokal;
+cookie memakai flag Secure jika request API HTTPS atau proxy terpercaya meneruskan
+`X-Forwarded-Proto: https`. Proxy harus menimpa header forwarded dari klien.
+
+API publik hanya `/api/health`, status/setup/login/logout; `/api/auth/me` dan semua
+API lainnya memerlukan sesi. `GET /api/auth/status` memberi `setup_required`.
+Login gagal dibatasi 5 percobaan per username + IP koneksi selama 15 menit;
+limit disimpan per proses dan hilang saat restart, bukan perlindungan brute-force
+terdistribusi. Di belakang proxy, IP koneksi dapat sama untuk beberapa pengguna.
+Audit setup/login tidak menyimpan password. Next.js meneruskan cookie melalui
+rewrite `/api`; browser tidak menyimpan token di localStorage. Seed/demo juga
+login melalui API dan menjaga cookie hanya selama proses berjalan.
 
 ## Konfigurasi lingkungan
 
@@ -280,6 +326,8 @@ Sumber: [`backend/seoci/config.py`](backend/seoci/config.py),
 | Variabel | Bawaan | Fungsi |
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///./data/seoci.db` | Database SQLAlchemy dan dasar lokasi checkpoint; Compose memakai PostgreSQL. |
+| `AUTH_USERS_FILE` | `./data/auth-users` | File akun relatif terhadap direktori kerja backend; otomatis diabaikan Git di direktori data. Compose memakai `/app/data/auth-users` di volume `authdata`. Jika diganti, pastikan path berada di volume persisten dan jangan commit file tersebut. |
+| `AUTH_SECRET` | kosong | Secret penandatangan sesi. Isi secret acak yang panjang (minimal 32 karakter disarankan) atau biarkan API membuat `<AUTH_USERS_FILE>.secret`. Compose meneruskan nilai ini ke backend. |
 | `LLM_MODEL` | kosong | Kosong memilih mock; isi identifier LiteLLM seperti `openai/gpt-4o-mini` untuk model nyata. |
 | `LLM_API_BASE` | kosong | Opsional: base URL endpoint LLM yang diteruskan sebagai `api_base` ke LiteLLM. Kosong mempertahankan endpoint bawaan provider; Compose meneruskannya ke API dan worker. |
 | `LLM_API_KEY` | kosong | Kunci generik opsional, diteruskan sebagai `api_key` ke LiteLLM; dapat diganti lewat Settings. Compose meneruskannya ke API dan worker. |
@@ -405,6 +453,6 @@ diduplikasi di sini. Schema tersedia pada `/openapi.json`. Untuk menjalankan sat
 job sebagai diagnosis: `(cd backend && uv run python -m seoci.worker --once)`.
 Retry/cancel dan inspeksi artefak tersedia melalui workbench dan API.
 
-Batas MVP: autentikasi, pembatasan egress, verifikasi fakta mendalam, reservasi biaya
+Batas MVP: otorisasi per pengguna/proyek, pembatasan egress, verifikasi fakta mendalam, reservasi biaya
 sebelum panggilan model, dan kebijakan retensi/backup lintas aplikasi/checkpoint
 masih perlu penguatan. Publishing GitHub bukan pengganti tanggung jawab editor.

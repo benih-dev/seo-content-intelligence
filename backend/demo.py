@@ -1,21 +1,28 @@
 """Live curl acceptance transcript; start API and worker first."""
 import json
+import getpass
+from pathlib import Path
 import shlex
 import subprocess
 import time
+from tempfile import TemporaryDirectory
+
+COOKIE_FILE = None
 
 
 def curl(path, body=None, headers=None, echo=True, output=None):
     command = ["curl", "-fsS", "http://127.0.0.1:8000" + path]
+    if COOKIE_FILE:
+        command += ["--cookie", COOKIE_FILE, "--cookie-jar", COOKIE_FILE]
     if body is not None:
-        command += ["-H", "Content-Type: application/json", "-d", json.dumps(body, ensure_ascii=False)]
+        command += ["-H", "Content-Type: application/json", "--data-binary", "@-"]
     for header in headers or []:
         command += ["-H", header]
     if output:
         command += ["-o", output]
     if echo:
         print("$ " + shlex.join(command), flush=True)
-    result = subprocess.check_output(command, text=True)
+    result = subprocess.check_output(command, text=True, input=json.dumps(body, ensure_ascii=False) if body is not None else None)
     if echo and result:
         print(result, flush=True)
     return json.loads(result) if result else None
@@ -33,7 +40,8 @@ def wait_for(run_id, state):
     raise TimeoutError(state)
 
 
-def main():
+def walkthrough():
+    curl("/api/auth/login", {"username": input("Username: "), "password": getpass.getpass("Password: ")}, echo=False)
     curl("/api/health")
     project = curl("/api/projects", {"name": "Kebun Balkon Demo", "domain": "https://example.com", "niche": "berkebun di ruang terbatas", "audience": "pemula yang tinggal di apartemen", "language": "id", "country": "ID", "voice_profile": "ramah, jelas, praktis"})
     run = curl("/api/runs", {"project_id": project["id"], "mode": "selected", "primary_keyword": "berkebun di balkon"}, ["Idempotency-Key: live-demo-balcony"])
@@ -51,6 +59,17 @@ def main():
     print(f"$ curl -fsS http://127.0.0.1:8000/api/runs/{ident} | python -c '<extract audit transitions>'", flush=True)
     print(json.dumps([{"at": x["created_at"], "actor": x["actor"], **x["data"]} for x in final["audit"] if x["action"] == "transition"], ensure_ascii=False, indent=2), flush=True)
     print(f"RUN_ID={ident}", flush=True)
+
+
+def main():
+    global COOKIE_FILE
+    Path("data").mkdir(exist_ok=True)
+    with TemporaryDirectory(dir="data", prefix="demo-session-") as directory:
+        COOKIE_FILE = str(Path(directory) / "cookies")
+        try:
+            walkthrough()
+        finally:
+            COOKIE_FILE = None
 
 
 if __name__ == "__main__":

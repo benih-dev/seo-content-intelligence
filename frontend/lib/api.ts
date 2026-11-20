@@ -5,6 +5,7 @@ export async function api<T>(
   headers?: Record<string, string>,
 ): Promise<T> {
   const response = await fetch(`/api${path}`, {
+    credentials: "same-origin",
     method: method || (body === undefined ? "GET" : "POST"),
     headers: {
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
@@ -17,6 +18,9 @@ export async function api<T>(
     const data = await response
       .json()
       .catch(() => ({ detail: response.statusText }));
+    if (response.status === 401 && !path.startsWith("/auth/") && typeof window !== "undefined") {
+      window.location.replace(authPath(data.setup_required === true));
+    }
     throw new Error(
       typeof data.detail === "string"
         ? data.detail
@@ -24,6 +28,9 @@ export async function api<T>(
     );
   }
   return response.status === 204 ? (undefined as T) : response.json();
+}
+export function authPath(setupRequired: boolean) {
+  return setupRequired ? "/setup" : "/login";
 }
 export function label(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (x) => x.toUpperCase());
