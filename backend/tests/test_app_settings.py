@@ -35,6 +35,7 @@ def test_read_write_secrets_and_field_only_audit(client, configured_env):
     for name in SECRET_FIELDS:
         assert initial.json()[name] == {"configured": False, "source": "none"}
     secrets = {name: f"dummy-private-{name}-123456789" for name in SECRET_FIELDS}
+    secrets["gsc_service_account_json"] = json.dumps({"type": "service_account", "client_email": "tester@example.com", "private_key": "dummy-private-gsc-key"})
     result = client.put("/api/settings", json={**secrets, "llm_model": "openai/custom", "llm_api_base": "http://localhost:8080/v1"})
     assert result.status_code == 200
     for response in (result, client.get("/api/settings")):
@@ -150,7 +151,9 @@ def test_worker_error_does_not_persist_or_log_credentials(client, configured_env
 
 def test_exports_and_run_context_do_not_contain_credentials(client, configured_env, project):
     secret = "dummy-private-export-key-12345"
-    client.put("/api/settings", json={key: secret for key in SECRET_FIELDS})
+    values = {key: secret for key in SECRET_FIELDS}
+    values["gsc_service_account_json"] = json.dumps({"type": "service_account", "client_email": "tester@example.com", "private_key": secret})
+    assert client.put("/api/settings", json=values).status_code == 200
     run = to_final(client, project)
     approve(client, run, "final")
     assert secret not in json.dumps(detail(client, run))

@@ -133,7 +133,11 @@ def keyword_research(db, run):
         db.add(record)
         db.flush()
         db.add(KeywordMetricSnapshot(keyword_id=record.id, provider=metric["provider"], metric_type="search_volume",
-                                     value=metric["volume"], period=metric["period"], geo=run.locale))
+                                     value=metric["volume"], period=metric["period"], geo=metric["locale"]))
+        if metric["provider"] == "search_console":
+            for name in ("impressions", "clicks", "ctr", "position"):
+                db.add(KeywordMetricSnapshot(keyword_id=record.id, provider=metric["provider"], metric_type=name,
+                                             value=metric.get(name), period=metric["period"], geo=metric["locale"]))
         shortlist.append({"id": record.id, "keyword": keyword, **record.data})
     transition(db, run, "keyword_review", reason="Shortlist ready; human keyword approval required")
     return {"shortlist": shortlist, "ymyl": ymyl(run.primary_keyword)}

@@ -8,7 +8,11 @@ class Settings(BaseSettings):
     llm_model: str = ""
     llm_api_base: str = ""
     llm_api_key: str = ""
-    serp_provider: Literal["mock", "dataforseo"] = "mock"
+    serp_provider: Literal["mock", "dataforseo", "serper"] = "mock"
+    keyword_provider: Literal["", "mock", "dataforseo", "search_console"] = ""
+    serper_api_key: str = ""
+    gsc_service_account_json: str = ""
+    gsc_site_url: str = ""
     dataforseo_login: str = ""
     dataforseo_password: str = ""
     max_revision_cycles: int = 2

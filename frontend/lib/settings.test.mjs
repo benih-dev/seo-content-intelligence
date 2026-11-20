@@ -30,6 +30,18 @@ test("secret badges expose status and source, not values", () => {
   assert.equal(secretStatus(initial.dataforseo_password), "Not set");
 });
 
+test("split provider choices and write-only GSC/Serper credentials produce partial patches", () => {
+  const saved = { ...initial, keyword_provider: "", gsc_site_url: "" };
+  const values = { ...saved, serp_provider: "serper", keyword_provider: "search_console", gsc_site_url: "sc-domain:example.com" };
+  const account = JSON.stringify({ type: "service_account", client_email: "test@example.com", private_key: "dummy" });
+  assert.deepEqual(settingsPatch(saved, values, { serper_api_key: "dummy-serper", gsc_service_account_json: account }), {
+    serp_provider: "serper", keyword_provider: "search_console", gsc_site_url: "sc-domain:example.com",
+    serper_api_key: "dummy-serper", gsc_service_account_json: account,
+  });
+  assert.deepEqual(settingsPatch(saved, saved, { gsc_service_account_json: null }), { gsc_service_account_json: null });
+  assert.deepEqual(settingsPatch(saved, saved, { gsc_service_account_json: "" }), {});
+});
+
 test("a failed save retains pending credentials and clears them only after a successful retry", async () => {
   const page = readFileSync(new URL("../app/settings/page.tsx", import.meta.url), "utf8");
   const file = ts.createSourceFile("page.tsx", page, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);

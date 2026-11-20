@@ -1,10 +1,10 @@
-export const publicSettingFields = ["llm_model", "llm_api_base", "serp_provider", "dataforseo_login", "github_api_url"] as const;
-export const secretSettingFields = ["llm_api_key", "dataforseo_password", "github_token"] as const;
+export const publicSettingFields = ["llm_model", "llm_api_base", "serp_provider", "keyword_provider", "gsc_site_url", "dataforseo_login", "github_api_url"] as const;
+export const secretSettingFields = ["llm_api_key", "dataforseo_password", "github_token", "serper_api_key", "gsc_service_account_json"] as const;
 export type PublicSetting = typeof publicSettingFields[number];
 export type SecretSetting = typeof secretSettingFields[number];
 export type SecretStatus = { configured: boolean; source: "db" | "env" | "none" };
 export type AppSettings = Record<PublicSetting, string> & Record<SecretSetting, SecretStatus> & {
-  modes: { llm: "mock" | "live"; serp: "mock" | "dataforseo" };
+  modes: { llm: "mock" | "live"; serp: "mock" | "dataforseo" | "serper"; keyword: "mock" | "dataforseo" | "search_console" };
 };
 
 export function settingsPatch(initial: AppSettings, values: Record<PublicSetting, string>, secrets: Partial<Record<SecretSetting, string | null>>) {

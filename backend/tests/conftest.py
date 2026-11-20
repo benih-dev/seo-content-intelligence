@@ -21,6 +21,8 @@ def raw_client(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "database_url", url)
     monkeypatch.setattr(settings, "llm_model", "")
     monkeypatch.setattr(settings, "serp_provider", "mock")
+    for key in ("keyword_provider", "serper_api_key", "gsc_service_account_json", "gsc_site_url"):
+        monkeypatch.setattr(settings, key, "")
     monkeypatch.setattr(settings, "run_budget_usd", 2)
     monkeypatch.setattr(settings, "auth_users_file", str(tmp_path / "auth-users"))
     monkeypatch.setattr(settings, "auth_secret", "test-session-secret-with-at-least-32-characters")

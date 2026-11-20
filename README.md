@@ -231,7 +231,7 @@ database aplikasi beserta tabel checkpoint. Jangan menyimpan token di Git/browse
 
 ## Settings melalui web
 
-Buka **Settings** di sidebar (`/settings`) untuk mengatur LLM, DataForSEO dan
+Buka **Settings** di sidebar (`/settings`) untuk mengatur LLM, DataForSEO, Serper, Google Search Console dan
 GitHub tanpa mengubah environment atau me-restart API/worker. Jalankan
 `(cd backend && uv run alembic upgrade head)` saat upgrade; migration `0004`
 menambahkan tabel `app_settings` dan audit aplikasi.
@@ -260,6 +260,35 @@ Tambahkan hanya akun tepercaya dan batasi akses jaringan. Kunci disimpan sebagai
 database (bukan dienkripsi), sehingga file/volume database dan backup harus
 dilindungi. Write-only berarti kunci tidak ditampilkan kembali, bukan bahwa
 penyimpanan database terenkripsi.
+
+### Serper dan Google Search Console
+
+Di Settings, pilih **SERP provider** dan **Keyword data provider** secara terpisah.
+Pilihan keyword **Automatic** (nilai kosong) mempertahankan kompatibilitas:
+DataForSEO ketika SERP memakai DataForSEO; selain itu mock. Memilih `mock`
+secara eksplisit menonaktifkan data keyword live walaupun SERP live.
+Contoh kombinasi murah: SERP **Serper** dengan kunci Serper, keyword
+**Search Console (own site)** dengan service-account JSON dan properti GSC.
+Kedua adapter memakai timeout dan cache jaringan aplikasi; tidak perlu restart.
+
+Untuk GSC, aktifkan Google Search Console API pada proyek Google Cloud, buat
+service account dan unduh JSON key. **Tambahkan email service account sebagai
+pengguna pada properti Search Console** yang dipilih. Tempel seluruh JSON pada
+textarea write-only Settings, bukan nama/path file. JSON harus bertipe
+`service_account` dengan `client_email` dan `private_key`; kunci privat harus valid
+agar autentikasi berhasil. Aplikasi memakai scope baca-saja
+`https://www.googleapis.com/auth/webmasters.readonly`.
+
+GSC mengambil dimensi `query` selama 90 hari kalender sampai kemarin, seluruh
+negara/bahasa/perangkat pada properti tersebut (bukan estimasi pasar untuk locale
+proyek). Discovery memakai 10 query teratas menurut klik. Mode selected memakai
+filter query persis; jika tidak ditemukan, metrik kosong dengan catatan jelas.
+Klik, impresi, CTR dan posisi rata-rata disimpan; **search volume tetap `null`**.
+Impresi menjadi sinyal demand dengan confidence lebih rendah dan provenance
+**Search Console (own site)**. Data beberapa hari terakhir bisa belum lengkap;
+properti tanpa query menghentikan discovery dengan pesan yang dapat ditindaklanjuti.
+Serper memetakan organic results serta menyimpan people-also-ask dan related
+searches dalam snapshot SERP; negara/bahasa mengikuti proyek.
 
 ## Login dan akun lokal
 
@@ -333,7 +362,11 @@ Sumber: [`backend/seoci/config.py`](backend/seoci/config.py),
 | `LLM_API_KEY` | kosong | Kunci generik opsional, diteruskan sebagai `api_key` ke LiteLLM; dapat diganti lewat Settings. Compose meneruskannya ke API dan worker. |
 | `OPENAI_API_KEY` | tidak disetel aplikasi | Kunci OpenAI, dibaca LiteLLM; Compose meneruskan nilai atau string kosong. |
 | `ANTHROPIC_API_KEY` | tidak disetel aplikasi | Kunci Anthropic bila identifier LiteLLM memakai provider itu; Compose juga meneruskannya. |
-| `SERP_PROVIDER` | `mock` | `mock` atau `dataforseo`; mengendalikan SERP, keyword dan penemuan sumber riset. |
+| `SERP_PROVIDER` | `mock` | `mock`, `dataforseo`, atau `serper`; mengendalikan SERP dan penemuan sumber riset. |
+| `KEYWORD_PROVIDER` | kosong | `mock`, `dataforseo`, atau `search_console`. Jika kosong/belum diatur, mengikuti perilaku lama: DataForSEO jika SERP memakai DataForSEO; selain itu mock. |
+| `SERPER_API_KEY` | kosong | Kunci Serper untuk SERP Google melalui `https://google.serper.dev/search`. |
+| `GSC_SERVICE_ACCOUNT_JSON` | kosong | Isi JSON service account lengkap (bukan path file), rahasia. Gunakan JSON satu baris yang dikutip sesuai shell/format `.env`, atau isi melalui Settings. |
+| `GSC_SITE_URL` | kosong | Properti Search Console persis seperti terdaftar: `sc-domain:example.com` atau `https://example.com/`; pertahankan trailing slash untuk properti URL-prefix. |
 | `DATAFORSEO_LOGIN` | kosong | Login akun DataForSEO. |
 | `DATAFORSEO_PASSWORD` | kosong | Password akun DataForSEO. |
 | `MAX_REVISION_CYCLES` | `2` | Batas siklus revisi otomatis QA dan permintaan revisi akhir yang berbagi penghitung. |
@@ -350,8 +383,11 @@ Pemilihan provider **bukan satu sakelar global**:
 |---|---|
 | `LLM_MODEL` kosong | `MockLLMClient`; tanpa panggilan model berbayar. |
 | `LLM_MODEL` terisi | `LiteLLMClient`; butuh kredensial provider model. |
-| `SERP_PROVIDER=mock` | Mock SERP/keyword dan sumber demo; metrik yang tidak ada tetap unavailable. |
-| `SERP_PROVIDER=dataforseo` | SERP/keyword DataForSEO nyata; riset sumber mengikuti SERP. Butuh kedua kredensial DataForSEO. |
+| `SERP_PROVIDER=mock` | Mock SERP dan sumber demo; keyword memakai pilihan terpisah, atau mock jika belum dipilih. |
+| `SERP_PROVIDER=dataforseo` | SERP DataForSEO nyata; riset sumber mengikuti SERP. Butuh kedua kredensial DataForSEO. Keyword juga DataForSEO hanya jika belum dipilih terpisah. |
+| `SERP_PROVIDER=serper` | SERP Serper nyata dengan `SERPER_API_KEY`; keyword tetap mock kecuali dipilih terpisah. |
+| `KEYWORD_PROVIDER=dataforseo` | Saran keyword dan volume Google Ads DataForSEO, terlepas dari pilihan SERP. |
+| `KEYWORD_PROVIDER=search_console` | Query dan metrik milik properti sendiri dari Google Search Console; bukan volume pencarian pasar. |
 
 Mengisi API key saja tidak mengaktifkan provider nyata. Memilih provider nyata
 tanpa kredensial menghasilkan error; tidak ada fallback diam-diam ke mock.

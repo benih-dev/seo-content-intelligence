@@ -59,6 +59,12 @@ export interface Keyword extends Version {
     inventory_missing_metadata?: number;
     metrics: {
       volume: number | null;
+      impressions?: number | null;
+      clicks?: number | null;
+      ctr?: number | null;
+      position?: number | null;
+      provenance?: string;
+      note?: string;
       competition: string | number | null;
       provider: string;
       status: string;
