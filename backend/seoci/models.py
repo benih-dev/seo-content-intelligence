@@ -178,6 +178,7 @@ class Job(Identity, Base):
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(default=now)
     started_at: Mapped[str | None]
+    heartbeat_at: Mapped[str | None]
 
 
 class ResponseCache(Identity, Base):

@@ -13,7 +13,7 @@ ALLOWED = {
     "qa": {"revision_required", "final_review", "blocked"},
     "revision_required": {"drafting", "optimizing", "qa"},
     "final_review": {"article_ready", "revision_required"},
-    "article_ready": {"exported"},
+    "article_ready": {"exported", "failed"},
     "failed": {"retry", "resumed", "cancelled"},
     "blocked": {"retry", "resumed", "cancelled"},
     "needs_human_research": {"resumed", "cancelled"},
@@ -30,7 +30,7 @@ def transition(db, run, new_state, actor="system", reason="", artifact_ref=None)
     # resumed is an explicit restoration to the last valid checkpoint stage.
     if old == "resumed":
         allowed = new_state == run.resume_state
-    elif new_state == "failed" and old not in {"exported", "cancelled", "article_ready"}:
+    elif new_state == "failed" and old not in {"exported", "cancelled"}:
         allowed = True
     else:
         allowed = new_state in ALLOWED.get(old, set())
