@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
@@ -18,7 +19,7 @@ from seoci.models import (ApprovalEvent, ArticleDraft, ArtifactFile, AuditEvent,
                           SiteContentItem, StageArtifact, WorkflowRun)
 from seoci.pipeline.graph import latest
 from seoci.pipeline.state import transition
-from seoci.providers.llm import Brief
+from seoci.providers.llm import Brief, validation_message
 from seoci.providers.sitemap import import_sitemap
 
 
@@ -220,8 +221,8 @@ def approve(run_id: str, body: ApprovalInput, db=Depends(database)):
     if body.stage == "brief":
         try:
             Brief.model_validate({**latest(db, ContentBrief, run_id).data, **body.payload.get("edits", {})})
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+        except ValidationError as exc:
+            raise HTTPException(422, validation_message(exc)) from exc
     if body.stage == "final" and body.decision == "approve":
         qa = latest(db, QAReview, run_id)
         if qa.data.get("expert_review_required") and not (body.payload.get("expert_reviewed") is True and body.comment.strip()):

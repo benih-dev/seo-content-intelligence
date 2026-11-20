@@ -2524,3 +2524,50 @@ legend {
     transition: none !important;
   }
 }
+.outline-row.level-3 {
+  padding-left: 28px;
+}
+.row-actions {
+  display: flex;
+  gap: 2px;
+}
+.row-actions .icon-button:disabled {
+  opacity: 0.3;
+}
+.link-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.link-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f1f3f6;
+}
+.link-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.link-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.inline-add {
+  display: flex;
+  gap: 8px;
+}
+.form-issues {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #b42318;
+  font-size: 12px;
+}

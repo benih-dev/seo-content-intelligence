@@ -42,6 +42,52 @@ def overlap(keyword, inventory):
             if len(tokens & set(re.findall(r"\w+", (x.title + " " + x.slug).lower()))) / max(1, len(tokens)) >= .5]
 
 
+def _url_key(url):
+    url = (url or "").strip()
+    try:
+        parts = urlparse(url)
+        host = parts.hostname or ""
+    except ValueError:
+        return url.lower()
+    return (host.removeprefix("www.") + parts.path.rstrip("/")).lower() + (f"?{parts.query}" if parts.query else "")
+
+
+def _terms(text):
+    return {x for x in re.findall(r"\w+", (text or "").lower()) if len(x) > 2}
+
+
+def suggest_internal_links(inventory, topic, limit=5):
+    """Rank inventory articles by shared topic terms; only real inventory URLs are returned."""
+    terms = _terms(topic)
+    ranked = []
+    for item in inventory:
+        shared = sorted(terms & _terms(f"{item.title} {item.slug}"))
+        if shared:
+            ranked.append((len(shared), item, shared))
+    ranked.sort(key=lambda x: -x[0])
+    return [{"url": item.url, "title": item.title, "anchor": item.title or item.slug, "status": "inventory",
+             "reason": "Related article in your inventory; shares: " + ", ".join(shared)} for _, item, shared in ranked[:limit]]
+
+
+def annotate_internal_links(links, inventory):
+    """FR-023: links must come from the inventory; anything else is kept only as a search suggestion."""
+    known = {_url_key(x.url): x for x in inventory}
+    result, seen = [], set()
+    for link in links:
+        item = known.get(_url_key(link.get("url", ""))) if link.get("url") else None
+        if item:
+            entry = {"url": item.url, "title": item.title, "anchor": link.get("anchor") or item.title or item.slug,
+                     "reason": link.get("reason") or "Selected from your inventory", "status": "inventory"}
+        else:
+            entry = {"url": link.get("url", ""), "title": link.get("title", ""), "anchor": link.get("anchor") or link.get("title") or link.get("url", ""),
+                     "reason": "Not in your blog inventory: search for or publish a matching article before linking", "status": "search_suggestion"}
+        key = _url_key(entry["url"]) or entry["anchor"].lower()
+        if key not in seen:
+            seen.add(key)
+            result.append(entry)
+    return result
+
+
 def ymyl(keyword):
     return bool(re.search(r"\b(financ\w*|invest\w*|health|medic\w*|legal|safety|kesehatan|obat|hukum|keuangan|dana|tabungan|diet|penyakit|emergency fund)\b", keyword.lower()))
 

@@ -127,7 +127,7 @@ export default function RunPage({
       if (path === "approve" && (body as { stage: string }).stage === "keyword")
         setTab("brief");
       if (path === "approve" && (body as { stage: string }).stage === "brief")
-        setTab("article");
+        setTab("research");
     } catch (e) {
       setError((e as Error).message);
     } finally {
