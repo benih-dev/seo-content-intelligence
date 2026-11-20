@@ -73,3 +73,15 @@ def test_brief_edits_are_cleaned_and_errors_are_readable(client, project):
     work_once()
     brief = detail(client, run)["briefs"][-1]["data"]
     assert brief["questions"] == ["Apa itu?", "Kapan?"] and brief["intent"] == "commercial"
+
+
+def test_link_keys_keep_queries_and_tolerate_malformed_urls():
+    from types import SimpleNamespace
+
+    from seoci.pipeline.quality import annotate_internal_links
+    inventory = [SimpleNamespace(url=f"https://example.com/post?id={i}", title=f"Post {i}", slug="") for i in (1, 2)]
+    links = annotate_internal_links([{"url": "https://example.com/post?id=1"}, {"url": "https://example.com/post?id=2"},
+                                     {"url": "https://[example.com/broken"}], inventory)
+    assert [(x["url"], x["status"]) for x in links] == [("https://example.com/post?id=1", "inventory"),
+                                                        ("https://example.com/post?id=2", "inventory"),
+                                                        ("https://[example.com/broken", "search_suggestion")]

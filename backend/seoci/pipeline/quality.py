@@ -41,8 +41,13 @@ def overlap(keyword, inventory):
 
 
 def _url_key(url):
-    parts = urlparse((url or "").strip())
-    return ((parts.hostname or "").removeprefix("www.") + parts.path.rstrip("/")).lower()
+    url = (url or "").strip()
+    try:
+        parts = urlparse(url)
+        host = parts.hostname or ""
+    except ValueError:
+        return url.lower()
+    return (host.removeprefix("www.") + parts.path.rstrip("/")).lower() + (f"?{parts.query}" if parts.query else "")
 
 
 def _terms(text):
