@@ -1,6 +1,5 @@
 import difflib
 import hashlib
-import json
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 

@@ -110,7 +110,7 @@ def keyword_research(db, run):
             db.add(SERPResult(snapshot_id=snap.id, **result))
         intent = llm_call(db, run, "intent", Intent, {"keyword": keyword, "serp": snapshot})
         metric = metrics[keyword]
-        score = opportunity(metric, not snapshot.get("mock", False))
+        score = opportunity(metric, not snapshot.get("mock", False), keyword, run.context["project"], intent["label"])
         record = KeywordRecord(run_id=run.id, keyword=keyword, locale=run.locale, intent=intent["label"],
                                score=score["score"], confidence=score["confidence"], data={"intent": intent, "metrics": metric, "opportunity": score, "serp_snapshot_id": snap.id})
         db.add(record)
@@ -189,9 +189,9 @@ def evidence_research(db, run):
                              published_at=source["published_at"], retrieved_at=source["retrieved_at"], data={"snippet": source["snippet"], "mock": source["mock"]})
         db.add(row)
         db.flush()
-        db.add(EvidenceItem(run_id=run.id, source_id=row.id, claim="Clear, reader-focused editorial organization helps readers evaluate information.",
+        db.add(EvidenceItem(run_id=run.id, source_id=row.id, claim=source["snippet"].removeprefix("<untrusted_source>").removesuffix("</untrusted_source>"),
                              supporting_note=source["snippet"], confidence=.4 if source["mock"] else .6,
-                             review_status="needs_verification", data={"url": row.url, "scope": "editorial methodology only" if source["mock"] else "source snippet; verify claim context"}))
+                             review_status="needs_verification", data={"url": row.url, "scope": "demo source summary; not fetched or independently verified" if source["mock"] else "source snippet; verify claim context"}))
         ids.append(row.id)
     transition(db, run, "drafting", reason="Evidence ledger collected")
     return {"source_ids": ids, "unresolved": "Sources require editorial verification; mock sources are not topic-specific research" if sources[0]["mock"] else "Verify source context"}
@@ -225,8 +225,11 @@ def qa(db, run):
     review = llm_call(db, run, "qa", QA, {"body_md": row.body_md, "metadata": row.metadata_json})
     result["findings"] += review["findings"]
     result["summary"] = review["summary"]
+    result["status"] = "blocked" if any(x.get("severity") == "blocker" for x in result["findings"]) else "needs_revision" if any(x.get("severity") == "major" for x in result["findings"]) else "pass"
     db.add(QAReview(run_id=run.id, draft_id=row.id, version=row.version, data=result))
-    unresolved = [x for x in result["findings"] if x.get("severity") in {"blocker", "major"} and x.get("location") not in {"sources", "article"}]
+    human_flags = {"Expert review required", "YMYL sources need human verification"}
+    unresolved = [x for x in result["findings"] if x.get("severity") in {"blocker", "major"}
+                  and x.get("finding") not in human_flags]
     if unresolved and run.revision_count < settings.max_revision_cycles:
         run.revision_count += 1
         transition(db, run, "revision_required", reason="QA requires revision")

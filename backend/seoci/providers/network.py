@@ -64,3 +64,21 @@ def dfs(endpoint, payload):
     if not tasks or tasks[0].get("status_code") != 20000:
         raise RuntimeError("DataForSEO task failed: " + str(data.get("status_message", tasks[0].get("status_message") if tasks else "no tasks")))
     return tasks[0].get("result") or []
+
+
+def dfs_location(country, family="serp/google"):
+    if len(country) != 2:
+        return {"location_name": country}
+    def fetch():
+        data = request("GET", f"https://api.dataforseo.com/v3/{family}/locations/{country.lower()}",
+                       auth=(settings.dataforseo_login, settings.dataforseo_password)).json()
+        tasks = data.get("tasks") or []
+        if not tasks or tasks[0].get("status_code") != 20000:
+            raise RuntimeError("DataForSEO location lookup failed")
+        locations = tasks[0].get("result") or []
+        row = next((x for x in locations if x.get("country_iso_code", "").upper() == country.upper()
+                    and x.get("location_type", "").lower() == "country"), None)
+        if not row:
+            raise ValueError(f"Unsupported DataForSEO country: {country}")
+        return {"location_code": row["location_code"]}
+    return cached(f"{family}-location", country.upper(), "", "", fetch)

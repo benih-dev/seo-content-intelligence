@@ -11,6 +11,8 @@ class Base(DeclarativeBase):
 
 
 def make_engine(url):
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
     if url.startswith("sqlite"):
         path = url.split("///", 1)[-1]
         if path != ":memory:":

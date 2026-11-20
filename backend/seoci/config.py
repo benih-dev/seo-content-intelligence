@@ -1,11 +1,12 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Literal
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     database_url: str = "sqlite:///./data/seoci.db"
     llm_model: str = ""
-    serp_provider: str = "mock"
+    serp_provider: Literal["mock", "dataforseo"] = "mock"
     dataforseo_login: str = ""
     dataforseo_password: str = ""
     max_revision_cycles: int = 2

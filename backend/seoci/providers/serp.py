@@ -2,7 +2,8 @@ from typing import Protocol
 
 from seoci.config import settings
 from seoci.models import now
-from seoci.providers.network import cached, dfs
+from seoci.providers.demo_topics import topic_sources
+from seoci.providers.network import cached, dfs, dfs_location
 
 
 class SerpProvider(Protocol):
@@ -11,6 +12,10 @@ class SerpProvider(Protocol):
 
 class MockSerp:
     def search(self, query, locale, device="desktop"):
+        sources = topic_sources(query)
+        if sources:
+            return {"query": query, "locale": locale, "device": device, "provider": "mock", "captured_at": now(),
+                    "mock": True, "results": [{"rank": i + 1, **source} for i, source in enumerate(sources)]}
         return {"query": query, "locale": locale, "device": device, "provider": "mock",
                 "captured_at": now(), "mock": True, "results": [
                     {"rank": 1, "url": "https://developers.google.com/search/docs/fundamentals/creating-helpful-content",
@@ -23,7 +28,7 @@ class DataForSEOSerp:
     def search(self, query, locale, device="desktop"):
         language, country = locale.split("-", 1)
         def fetch():
-            result = dfs("serp/google/organic/live/advanced", {"keyword": query, "location_name": country,
+            result = dfs("serp/google/organic/live/advanced", {"keyword": query, **dfs_location(country),
                          "language_code": language, "device": device, "depth": 10})
             items = result[0].get("items", []) if result else []
             rows = [{"rank": x["rank_group"], "url": x["url"], "title": x["title"],

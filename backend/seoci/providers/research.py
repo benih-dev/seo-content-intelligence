@@ -1,4 +1,5 @@
 import re
+import httpx
 from html import unescape
 from urllib.parse import urlparse
 
@@ -22,7 +23,7 @@ class ResearchProvider:
                 if fetch_pages:
                     try:
                         text += " " + request("GET", safe_url(row["url"])).text[:100000]
-                    except (ValueError, OSError, RuntimeError):
+                    except (ValueError, OSError, RuntimeError, httpx.HTTPError):
                         pass
                 sources[row["url"]] = {**row, "publisher": urlparse(row["url"]).hostname,
                     "published_at": None, "retrieved_at": now(), "snippet": untrusted(text),

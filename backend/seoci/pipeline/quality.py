@@ -7,13 +7,26 @@ WEIGHTS = {"blog_topic_fit": .25, "intent_fit": .20, "serp_attainability_gap": .
            "business_value": .15, "demand_signals": .10, "data_confidence": .10}
 
 
-def opportunity(metrics, serp):
+def opportunity(metrics, serp, keyword="", project=None, intent=None):
     available = metrics.get("volume") is not None
-    scores = {"blog_topic_fit": 65, "intent_fit": 70, "serp_attainability_gap": 55 if serp else None,
-              "business_value": 60, "demand_signals": min(100, metrics["volume"] / 100) if available else None,
+    project = project or {}
+    tokens = set(re.findall(r"\w+", keyword.lower()))
+    niche_tokens = set(re.findall(r"\w+", (project.get("niche", "") + " " + project.get("audience", "")).lower()))
+    business_tokens = set(re.findall(r"\w+", project.get("business_objective", "").lower()))
+    fit = len(tokens & niche_tokens) / max(1, len(tokens))
+    business = len(tokens & business_tokens) / max(1, len(tokens))
+    scores = {"blog_topic_fit": round(50 + 50 * fit), "intent_fit": 75 if intent == "informational" else 50,
+              "serp_attainability_gap": 50 if serp else None,
+              "business_value": round(50 + 50 * business), "demand_signals": min(100, metrics["volume"] / 100) if available else None,
               "data_confidence": 70 if available and serp else 30}
+    reasons = {"blog_topic_fit": f"Keyword tokens overlapping niche/audience: {', '.join(sorted(tokens & niche_tokens)) or 'none; human fit review needed'}",
+               "intent_fit": f"Intent {intent or 'unconfirmed'} compared with an educational blog format",
+               "serp_attainability_gap": "Live snapshot exists; neutral starting score pending editorial competitor assessment",
+               "business_value": f"Shared terms with project objective: {', '.join(sorted(tokens & business_tokens)) or 'none; value needs human confirmation'}",
+               "demand_signals": "Provider volume scaled for internal prioritization; not a ranking estimate",
+               "data_confidence": "Completeness of identified demand and live SERP data"}
     dims = {key: {"score": score, "weight": WEIGHTS[key], "reason": "Unavailable provider data" if score is None else
-                  "Editorial heuristic, not a Google metric or ranking prediction", "confidence": .65 if available and serp else .3}
+                  reasons[key], "confidence": .65 if key in {"demand_signals", "data_confidence"} and available and serp else .3}
             for key, score in scores.items()}
     total_weight = sum(WEIGHTS[k] for k, v in scores.items() if v is not None)
     return {"dimensions": dims, "score": round(sum(WEIGHTS[k] * v for k, v in scores.items() if v is not None) / total_weight, 1),
