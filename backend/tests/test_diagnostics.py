@@ -144,8 +144,8 @@ def test_connection_probes_bypass_cache_after_credentials_change(client, monkeyp
     def respond(method, url, **kwargs):
         if kwargs.get("headers", {}).get("X-API-KEY") == "invalid-probe-key" or kwargs.get("auth", (None, None))[1] == "invalid-probe-password":
             raise status_error(401)
-        result = [{"country_iso_code": "US", "location_type": "country", "location_code": 2840}] if "/locations/" in url else []
-        return httpx.Response(200, json={"organic": [], "tasks": [{"status_code": 20000, "result": result}]})
+        result = [{"country_iso_code": "US", "location_type": "country", "location_code": 2840}] if "/locations/" in url else [{"items": [{"type": "organic", "rank_group": 1, "url": "https://example.com", "title": "Gardening"}]}]
+        return httpx.Response(200, json={"organic": [{"position": 1, "link": "https://example.com", "title": "Gardening"}], "tasks": [{"status_code": 20000, "result": result}]})
     request = Mock(side_effect=respond)
     monkeypatch.setattr(serp, "request", request)
     monkeypatch.setattr(network, "request", request)
@@ -162,6 +162,19 @@ def test_python_event_logging(client, caplog):
     with caplog.at_level(logging.INFO):
         record_event(message="Provider call succeeded", provider="test")
     assert "Provider call succeeded" in caplog.text
+
+
+def test_project_deletion_removes_only_its_run_diagnostics(client, project):
+    run_id = new_run(client, project)
+    assert client.delete(f"/api/projects/{project['id']}").status_code == 409
+    assert work_once()
+    persist_events([{"time": "2026-01-01", "level": "info", "run_id": None, "message": "Connection probe"},
+                    {"time": "2026-01-02", "level": "info", "run_id": "other-run", "message": "Other project"}])
+    assert client.get(f"/api/logs?run_id={run_id}").json()
+    assert client.delete(f"/api/projects/{project['id']}").status_code == 204
+    assert client.get(f"/api/runs/{run_id}").status_code == 404
+    rows = client.get("/api/logs").json()
+    assert {row["run_id"] for row in rows} == {None, "other-run"}
 
 
 def test_non_json_model_output(client, monkeypatch):

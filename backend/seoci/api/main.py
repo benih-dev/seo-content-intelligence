@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
 
 from seoci.api.schemas import (ApprovalInput, DraftInput, InventoryInput, ProjectInput, RunInput,
@@ -22,7 +22,7 @@ from seoci import auth
 from seoci.db import Session, init_db
 from seoci.diagnostics import protect_logging
 from seoci.export import render_md, row_dict, with_article_h1
-from seoci.models import (ApprovalEvent, ArticleDraft, ArtifactFile, AuditEvent, ContentBrief, EvidenceItem,
+from seoci.models import (ApprovalEvent, ArticleDraft, ArtifactFile, AuditEvent, ContentBrief, DiagnosticEvent, EvidenceItem,
                           Job, KeywordRecord, Project, QAReview, ResearchSource, SERPSnapshot,
                           SiteContentItem, StageArtifact, WorkflowRun, now)
 from seoci.pipeline.graph import latest
@@ -140,6 +140,7 @@ def delete_project(project_id: str, db=Depends(database)):
     runs = list(db.scalars(select(WorkflowRun.id).where(WorkflowRun.project_id == project_id)))
     if runs and db.scalar(select(Job.id).where(Job.run_id.in_(runs), Job.status.in_(["pending", "running"]))):
         raise HTTPException(409, "Cannot delete a project with active jobs")
+    db.execute(delete(DiagnosticEvent).where(DiagnosticEvent.run_id.in_(runs)))
     db.delete(row)
     db.commit()
 
