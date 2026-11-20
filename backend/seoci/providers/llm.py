@@ -85,8 +85,12 @@ class Brief(BaseModel):
         previous = 0
         for item in self.outline:
             for key in ("heading", "purpose"):
-                if isinstance(item.get(key), str):
-                    item[key] = item[key].strip()
+                value = item.get(key, "")
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    value = str(value)
+                if not isinstance(value, str):
+                    raise ValueError(f"Outline {key}s must be text")
+                item[key] = value.strip()
             level = item.get("level")
             if not isinstance(level, int) or level not in {1, 2, 3} or not item.get("heading"):
                 raise ValueError("Every outline section needs a heading and a level of H1, H2 or H3")

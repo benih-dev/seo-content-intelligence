@@ -85,3 +85,16 @@ def test_link_keys_keep_queries_and_tolerate_malformed_urls():
     assert [(x["url"], x["status"]) for x in links] == [("https://example.com/post?id=1", "inventory"),
                                                         ("https://example.com/post?id=2", "inventory"),
                                                         ("https://[example.com/broken", "search_suggestion")]
+
+
+def test_outline_text_fields_are_coerced_or_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    from seoci.providers.llm import Brief
+    base = {"angle": "a", "audience": "b", "intent": "informational", "questions": [], "exclusions": [],
+            "internal_links": [], "source_plan": []}
+    brief = Brief.model_validate({**base, "outline": [{"level": 1, "heading": 2026, "purpose": 1}, {"level": 2, "heading": "B", "purpose": 3.5}]})
+    assert [(x["heading"], x["purpose"]) for x in brief.outline] == [("2026", "1"), ("B", "3.5")]
+    with pytest.raises(ValidationError, match="Outline purposes must be text"):
+        Brief.model_validate({**base, "outline": [{"level": 1, "heading": "A", "purpose": ["x"]}, {"level": 2, "heading": "B", "purpose": "y"}]})
