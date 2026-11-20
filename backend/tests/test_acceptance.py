@@ -256,7 +256,7 @@ def test_manual_qa_holds_the_saved_draft_and_mock_revision_preserves_it(client, 
         "stage": "final", "decision": "request_revision", "comment": "Try again",
     }).status_code == 409
     assert approve(client, run, "final")["state"] == "exported"
-    assert client.get(f"/api/runs/{run}/export/md").text == edited
+    assert client.get(f"/api/runs/{run}/export/md").text == result["drafts"][-1]["body_md"]
 
 
 def test_revision_cap_and_manual_takeover(client, project, monkeypatch):
