@@ -97,6 +97,18 @@ def test_inventory_link_keys_preserve_path_and_query_case():
     assert [(link["url"], link["status"]) for link in links] == [(url, "inventory") for url in urls]
 
 
+def test_brief_schema_tells_live_models_the_required_outline_shape():
+    from seoci.providers.llm import Brief
+    outline = Brief.model_json_schema()["properties"]["outline"]
+    assert outline["minItems"] == 2
+    assert "exactly one H1" in outline["description"]
+    item = outline["items"]
+    assert set(item["required"]) == {"level", "heading", "purpose"}
+    assert item["properties"]["level"] == {"type": "integer", "enum": [1, 2, 3]}
+    for field in ("heading", "purpose"):
+        assert item["properties"][field] == {"type": "string", "minLength": 1}
+
+
 def test_outline_text_fields_are_coerced_or_rejected():
     import pytest
     from pydantic import ValidationError
