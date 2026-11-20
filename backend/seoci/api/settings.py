@@ -17,6 +17,16 @@ from seoci.db import Session
 from seoci.models import AppSetting, AuditEvent, now
 
 
+def property_host(host):
+    host = host.encode("idna").decode("ascii").lower()
+    labels = host.split(".")
+    if (len(host) > 253 or len(labels) < 2
+            or any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) for label in labels)
+            or not re.fullmatch(r"(?:[a-z]{2,}|xn--[a-z0-9-]+)", labels[-1])):
+        raise ValueError("Use a valid Search Console property hostname")
+    return host
+
+
 class SettingsRoute(APIRoute):
     def get_route_handler(self):
         handler = super().get_route_handler()
@@ -63,15 +73,13 @@ class SettingsUpdate(BaseModel):
         if not value:
             return value
         if value.startswith("sc-domain:"):
-            if not re.fullmatch(r"sc-domain:(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}", value):
-                raise ValueError("Use a Search Console domain property")
-            return value
+            return "sc-domain:" + property_host(value[len("sc-domain:"):])
         parsed = urlsplit(value)
         if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password
                 or parsed.query or parsed.fragment or any(char.isspace() for char in value)):
             raise ValueError("Use a Search Console HTTP(S) URL-prefix property")
-        parsed.port
-        return value
+        port = f":{parsed.port}" if parsed.port is not None else ""
+        return parsed._replace(netloc=property_host(parsed.hostname) + port).geturl()
 
     @field_validator("gsc_service_account_json")
     @classmethod

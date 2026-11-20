@@ -197,6 +197,29 @@ def test_provider_validation_redacts_inputs(client, patch):
     assert "dummy-private" not in response.text
 
 
+@pytest.mark.parametrize("value,normalized", [
+    ("sc-domain:bücher.de", "sc-domain:xn--bcher-kva.de"),
+    ("sc-domain:example.xn--p1ai", "sc-domain:example.xn--p1ai"),
+    ("sc-domain:пример.рф", "sc-domain:xn--e1afmkfd.xn--p1ai"),
+    ("https://bücher.de/Blog/", "https://xn--bcher-kva.de/Blog/"),
+    ("https://example.xn--p1ai/", "https://example.xn--p1ai/"),
+    ("https://пример.рф:8443/Blog/", "https://xn--e1afmkfd.xn--p1ai:8443/Blog/"),
+])
+def test_idn_property_normalization(client, value, normalized):
+    response = client.put("/api/settings", json={"gsc_site_url": value})
+    assert response.status_code == 200
+    assert response.json()["gsc_site_url"] == normalized
+    assert client.get("/api/settings").json()["gsc_site_url"] == normalized
+
+
+@pytest.mark.parametrize("host", ["-bücher.de", "bücher..de", "bücher.123", "bad_name.de", "bücher.xn--", "a" * 64 + ".de"])
+@pytest.mark.parametrize("prefix,suffix", [("sc-domain:", ""), ("https://", "/")])
+def test_invalid_idn_property_hosts(client, host, prefix, suffix):
+    response = client.put("/api/settings", json={"gsc_site_url": prefix + host + suffix})
+    assert response.status_code == 422
+    assert client.get("/api/settings").json()["gsc_site_url"] == ""
+
+
 def test_new_credentials_redaction_env_precedence_clear(client, monkeypatch):
     for key, value in (("serper_api_key", "dummy-env"), ("gsc_service_account_json", ACCOUNT)):
         monkeypatch.setattr(settings, key, value)
