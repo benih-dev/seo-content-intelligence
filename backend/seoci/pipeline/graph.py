@@ -99,6 +99,7 @@ def keyword_research(db, run):
     candidates = provider.suggestions(run.primary_keyword, run.locale) if run.mode == "discovery" else [run.primary_keyword]
     metrics = provider.metrics(candidates, run.locale)
     shortlist = []
+    inventory = list(db.scalars(select(SiteContentItem).where(SiteContentItem.project_id == run.project_id)))
     for keyword in candidates:
         snapshot = get_serp().search(keyword, run.locale)
         if not snapshot.get("results"):
@@ -112,7 +113,9 @@ def keyword_research(db, run):
         metric = metrics[keyword]
         score = opportunity(metric, not snapshot.get("mock", False), keyword, run.context["project"], intent["label"])
         record = KeywordRecord(run_id=run.id, keyword=keyword, locale=run.locale, intent=intent["label"],
-                               score=score["score"], confidence=score["confidence"], data={"intent": intent, "metrics": metric, "opportunity": score, "serp_snapshot_id": snap.id})
+                               score=score["score"], confidence=score["confidence"], data={"intent": intent, "metrics": metric, "opportunity": score, "serp_snapshot_id": snap.id,
+                               "overlap_warnings": overlap(keyword, inventory), "inventory_count": len(inventory),
+                               "inventory_missing_metadata": sum(not x.title.strip() for x in inventory)})
         db.add(record)
         db.flush()
         db.add(KeywordMetricSnapshot(keyword_id=record.id, provider=metric["provider"], metric_type="search_volume",
@@ -135,6 +138,11 @@ def keyword_review(state):
             raise ValueError("Select a keyword from the shortlist")
         record.selected = True
         record.intent = payload.get("intent", record.intent)
+        snapshot = db.get(SERPSnapshot, record.data["serp_snapshot_id"])
+        score = opportunity(record.data["metrics"], not snapshot.data.get("mock", False),
+                            chosen, run.context["project"], record.intent)
+        record.data = {**record.data, "final_intent": record.intent, "opportunity": score}
+        record.score, record.confidence = score["score"], score["confidence"]
         run.primary_keyword = chosen
         transition(db, run, "strategy", actor="user", reason="Keyword and final intent approved", artifact_ref=record.id)
         db.commit()

@@ -16,7 +16,7 @@ def opportunity(metrics, serp, keyword="", project=None, intent=None):
     fit = len(tokens & niche_tokens) / max(1, len(tokens))
     business = len(tokens & business_tokens) / max(1, len(tokens))
     scores = {"blog_topic_fit": round(50 + 50 * fit), "intent_fit": 75 if intent == "informational" else 50,
-              "serp_attainability_gap": 50 if serp else None,
+              "serp_attainability_gap": None,
               "business_value": round(50 + 50 * business), "demand_signals": min(100, metrics["volume"] / 100) if available else None,
               "data_confidence": 70 if available and serp else 30}
     reasons = {"blog_topic_fit": f"Keyword tokens overlapping niche/audience: {', '.join(sorted(tokens & niche_tokens)) or 'none; human fit review needed'}",
@@ -25,7 +25,8 @@ def opportunity(metrics, serp, keyword="", project=None, intent=None):
                "business_value": f"Shared terms with project objective: {', '.join(sorted(tokens & business_tokens)) or 'none; value needs human confirmation'}",
                "demand_signals": "Provider volume scaled for internal prioritization; not a ranking estimate",
                "data_confidence": "Completeness of identified demand and live SERP data"}
-    dims = {key: {"score": score, "weight": WEIGHTS[key], "reason": "Unavailable provider data" if score is None else
+    reasons["serp_attainability_gap"] = "Unavailable: SERP snippets alone do not establish competitor strength or content gaps; excluded from total"
+    dims = {key: {"score": score, "weight": WEIGHTS[key], "reason": reasons[key] if key == "serp_attainability_gap" else "Unavailable provider data" if score is None else
                   reasons[key], "confidence": .65 if key in {"demand_signals", "data_confidence"} and available and serp else .3}
             for key, score in scores.items()}
     total_weight = sum(WEIGHTS[k] for k, v in scores.items() if v is not None)
@@ -37,7 +38,7 @@ def overlap(keyword, inventory):
     tokens = set(re.findall(r"\w+", keyword.lower()))
     return [{"url": x.url, "reason": "Shared keyword/title/slug tokens; consider updating existing article",
              "recommendation": "update_existing_or_differentiate"} for x in inventory
-            if len(tokens & set(re.findall(r"\w+", (x.title + " " + x.slug).lower()))) / max(1, len(tokens)) >= .5]
+            if len(tokens & set(re.findall(r"\w+", (x.title + " " + x.slug + " " + urlparse(x.url).path).lower()))) / max(1, len(tokens)) >= .5]
 
 
 def ymyl(keyword):

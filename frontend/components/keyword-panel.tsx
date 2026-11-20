@@ -20,7 +20,9 @@ export function KeywordPanel({
   busy: boolean;
 }) {
   const [selected, setSelected] = useState(
-    run.keywords.find((k) => k.selected)?.keyword || run.primary_keyword,
+    (run.keywords.find((k) => k.selected) ||
+      run.keywords.find((k) => k.keyword === run.primary_keyword) ||
+      [...run.keywords].sort((a, b) => b.score - a.score)[0])?.keyword,
   );
   const candidate =
     run.keywords.find((k) => k.keyword === selected) || run.keywords[0];
@@ -37,7 +39,7 @@ export function KeywordPanel({
   );
   const metric = candidate.data.metrics;
   const strategy = run.artifacts.find((x) => x.stage === "strategy");
-  const warnings = (strategy?.data.overlap_warnings || []) as {
+  const warnings = (candidate.data.overlap_warnings || strategy?.data.overlap_warnings || []) as {
     url: string;
     reason: string;
     recommendation: string;
@@ -164,7 +166,8 @@ export function KeywordPanel({
           <div className="intent-summary">
             <span className="intent-icon">↗</span>
             <div>
-              <h3>{label(candidate.intent)}</h3>
+              <small>Inferred intent</small>
+              <h3>{label(candidate.data.intent.label)}</h3>
               <small>
                 {percent(candidate.data.intent.confidence)} model confidence
               </small>
@@ -273,12 +276,33 @@ export function KeywordPanel({
         )}
       </Panel>
       <Panel title="Site fit & overlap" eyebrow="MAKE SPACE FOR ORIGINAL VALUE">
+        {candidate.data.overlap_warnings !== undefined && (
+          <>
+            {warnings.map((w) => (
+              <div className="notice warning" key={w.url}>
+                <div>
+                  <strong>Potential cannibalization</strong>
+                  <p>{w.reason}</p>
+                  <a href={w.url} target="_blank" rel="noreferrer">{w.url}</a>
+                  <p>Consider updating this article or differentiating the angle.</p>
+                </div>
+              </div>
+            ))}
+            {!candidate.data.inventory_count ? (
+              <p>No site inventory available. Import existing content to check overlap.</p>
+            ) : candidate.data.inventory_missing_metadata ? (
+              <p>Some inventory items lack titles. Overlap checks use available titles, slugs and URL paths and may miss competing content.</p>
+            ) : !warnings.length ? (
+              <p>No matching title, slug or URL path tokens found. This is not a semantic overlap assessment.</p>
+            ) : null}
+          </>
+        )}
         {strategy ? (
           <>
             <h3>{String(strategy.data.angle)}</h3>
             <p className="body-copy">{String(strategy.data.rationale)}</p>
             <p className="body-copy">{String(strategy.data.differentiation)}</p>
-            {warnings.length ? (
+            {candidate.data.overlap_warnings === undefined && (warnings.length ? (
               warnings.map((w) => (
                 <div className="notice warning" key={w.url}>
                   <Info size={18} />
@@ -300,7 +324,7 @@ export function KeywordPanel({
                 <Check size={16} />
                 No overlapping titles or slugs found in the current inventory.
               </div>
-            )}
+            ))}
             {strategy.data.ymyl === true && (
               <div className="notice warning">
                 Expert review required — this topic may affect high-impact
@@ -310,9 +334,8 @@ export function KeywordPanel({
           </>
         ) : (
           <p className="body-copy">
-            Site-fit strategy and overlap warnings are generated after keyword
-            approval, before you approve the brief. Existing content inventory
-            is used to identify potential cannibalization.
+            Site-fit strategy is generated after keyword approval. The overlap
+            assessment above uses the site inventory captured during research.
           </p>
         )}
       </Panel>
@@ -328,7 +351,7 @@ export function KeywordPanel({
             onClick={() =>
               command("approve", {
                 stage: "keyword",
-                payload: { keyword: selected, intent },
+                payload: { keyword: candidate.keyword, intent },
               })
             }
           >

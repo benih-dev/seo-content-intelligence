@@ -17,7 +17,7 @@ from seoci.models import (ApprovalEvent, ArticleDraft, ArtifactFile, AuditEvent,
                           SiteContentItem, StageArtifact, WorkflowRun)
 from seoci.pipeline.graph import latest
 from seoci.pipeline.state import transition
-from seoci.providers.llm import Brief
+from seoci.providers.llm import Brief, SUPPORTED_INTENTS
 from seoci.providers.sitemap import import_sitemap
 
 
@@ -130,6 +130,10 @@ def add_items(project_id: str, body: InventoryInput, db=Depends(database)):
             db.add(row)
         else:
             for key, value in item.model_dump().items():
+                if key in {"title", "slug"} and not value.strip():
+                    if key == "slug" and not row.slug:
+                        row.slug = parsed.path.strip("/")
+                    continue
                 setattr(row, key, value)
         db.flush()
         items.append(row_dict(row))
@@ -210,6 +214,10 @@ def approve(run_id: str, body: ApprovalInput, db=Depends(database)):
     if body.decision == "request_revision" and body.stage != "final":
         raise HTTPException(422, "Edit keyword/brief in payload and approve; request_revision is for final review")
     if body.stage == "keyword":
+        if "intent" in body.payload:
+            intent = body.payload["intent"]
+            if not isinstance(intent, str) or intent not in SUPPORTED_INTENTS:
+                raise HTTPException(422, "Select a supported search intent")
         keyword = body.payload.get("keyword", run.primary_keyword)
         if not db.scalar(select(KeywordRecord.id).where(KeywordRecord.run_id == run_id, KeywordRecord.keyword == keyword)):
             raise HTTPException(422, "Select an existing shortlist keyword")
