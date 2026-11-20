@@ -42,8 +42,8 @@ def main():
     curl(f"/api/runs/{ident}/approve", {"stage": "keyword", "payload": {"keyword": "berkebun di balkon", "intent": "informational"}, "comment": "Keyword relevan untuk pembaca apartemen"})
     wait_for(ident, "brief_review")
     curl(f"/api/runs/{ident}/approve", {"stage": "brief", "comment": "Struktur dan cakupan disetujui"})
-    wait_for(ident, "final_review")
-    curl(f"/api/runs/{ident}/approve", {"stage": "final", "comment": "Contoh demo dan batasan sumber telah diperiksa"})
+    reviewed = wait_for(ident, "final_review")["drafts"][-1]
+    curl(f"/api/runs/{ident}/approve", {"stage": "final", "payload": {"draft_id": reviewed["id"], "draft_version": reviewed["version"]}, "comment": "Contoh demo dan batasan sumber telah diperiksa"})
     final = wait_for(ident, "exported")
     curl(f"/api/runs/{ident}/export/md", output="data/demo-article.md")
     print("$ head -n 30 data/demo-article.md", flush=True)

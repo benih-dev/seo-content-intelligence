@@ -241,7 +241,7 @@ def drafting(db, run):
         transition(db, run, "drafting", reason="Apply bounded revision")
     old = latest(db, ArticleDraft, run.id)
     version = old.version + 1 if old else 1
-    feedback = {"previous_draft": old.body_md if old else None}
+    feedback = {"previous_draft": old.body_md if old else None, "revision_instructions": ""}
     if old:
         review = latest(db, QAReview, run.id)
         approval = db.scalar(select(ApprovalEvent).where(
@@ -250,6 +250,7 @@ def drafting(db, run):
         ).order_by(ApprovalEvent.created_at.desc()).limit(1)) if review else None
         feedback.update(reviewer_comment=approval.comment if approval else None,
                         qa_findings=review.data.get("findings", []) if review else [],
+                        revision_instructions=approval.comment if approval and approval.created_at >= old.created_at else "",
                         revision_instruction="Revise the previous draft in place. Preserve existing edits and "
                         "sections unless the reviewer comment or QA findings require changing them.")
     data = llm_call(db, run, "revise" if old else "draft", Draft, feedback)
@@ -313,6 +314,10 @@ def final_review(state):
             run.revision_count += 1
             transition(db, run, "revision_required", actor="user", reason=decision.get("comment", "User requested revision"))
         else:
+            draft = latest(db, ArticleDraft, run.id)
+            payload = decision.get("payload", {})
+            if payload.get("draft_id") != draft.id or payload.get("draft_version") != draft.version:
+                raise ValueError("Reviewed draft is not the latest draft")
             review = latest(db, QAReview, run.id)
             expert = decision.get("payload", {}).get("expert_reviewed", False)
             if review.data["expert_review_required"] and not expert:

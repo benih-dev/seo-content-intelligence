@@ -194,8 +194,14 @@ class MockLLMClient:
         elif task == "draft":
             data = {"body_md": self.article(ctx, indo), "change_log": "Initial evidence-led draft"}
         elif task == "revise":
-            data = {"body_md": ctx["previous_draft"],
+            data = {"body_md": ctx.get("previous_draft") or self.article(ctx, indo),
                     "change_log": "Demo revision: Markdown unchanged. Apply feedback manually."}
+            if task == "revise" and ctx.get("revision_instructions", "").strip():
+                heading = "Tanggapan atas arahan editor" if indo else "Response to editorial instructions"
+                data["body_md"] += f"\n\n## {heading}"
+                data["body_md"] += ("\n\nDalam demo ini, jadikan arahan tersebut sebagai daftar periksa: bandingkan pilihan dengan kebutuhan pembaca, periksa kesesuaian sumber, lalu tinjau kembali penjelasan sebelum publikasi. Editor tetap perlu memvalidasi perubahan secara langsung.\n" if indo else
+                                    "\n\nIn this demo, use these instructions as a review checklist: compare the options against reader needs, check source suitability, and review the explanation before publication. An editor must still validate the changes directly.\n")
+                data["change_log"] = "Preserved previous Markdown; added a demo review checklist. Apply feedback manually."
         elif task == "seo":
             desc = (f"Pelajari {k} melalui langkah praktis, perbandingan pilihan, contoh penerapan, dan daftar periksa agar keputusan Anda lebih terarah." if indo else
                     f"Explore {k} with a practical plan, comparison table, worked example and review checklist. Understand the trade-offs before you begin.")

@@ -21,6 +21,7 @@ import { BriefPanel } from "@/components/brief-panel";
 import { ResearchPanel } from "@/components/research-panel";
 import { ArticlePanel, Findings, SEOContent } from "@/components/article-panel";
 import { ActivityPanel } from "@/components/activity-panel";
+import { TabList } from "@/components/tab-list";
 
 const tabs = [
   { id: "keywords", title: "Keyword research", number: "01" },
@@ -235,7 +236,7 @@ export default function RunPage({
               </div>
             ))}
           </div>
-          <div className="run-status-strip">
+          <div className="run-status-strip" role="status" aria-live="polite">
             <span>
               {working ? (
                 <>
@@ -268,7 +269,7 @@ export default function RunPage({
             </div>
           )}
           {run.state === "exported" && (
-            <div className="export-success">
+            <div className="export-success" role="status" aria-live="polite">
               <div>
                 <Check size={18} />
                 <strong>Your article package is ready.</strong>
@@ -289,31 +290,28 @@ export default function RunPage({
               </div>
             </div>
           )}
-          <div
+          <TabList
+            id="run"
             className="tabs run-tabs"
-            role="tablist"
-            aria-label="Run sections"
-          >
-            {tabs.map((t) => (
-              <button
-                key={t.id}
-                role="tab"
-                aria-selected={tab === t.id}
-                aria-controls={`panel-${t.id}`}
-                onClick={() => setTab(t.id)}
-              >
+            label="Run sections"
+            selected={tab}
+            onSelect={setTab}
+            tabs={tabs.map((t) => ({ id: t.id, content: <>
                 <span className="tab-number">{t.number}</span>
                 {t.title}
                 {t.id === "research" && !!run.sources.length && (
                   <span className="count">{run.sources.length}</span>
                 )}
-              </button>
-            ))}
-          </div>
+              </> }))}
+          />
+          {tabs.filter((t) => t.id !== tab).map((t) => (
+            <div key={t.id} id={`run-panel-${t.id}`} role="tabpanel" aria-labelledby={`run-tab-${t.id}`} hidden />
+          ))}
           <div
-            id={`panel-${tab}`}
+            id={`run-panel-${tab}`}
             role="tabpanel"
-            aria-label={tabs.find((t) => t.id === tab)?.title}
+            aria-labelledby={`run-tab-${tab}`}
+            tabIndex={0}
           >
             {tab === "keywords" && (
               <KeywordPanel

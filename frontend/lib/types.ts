@@ -182,6 +182,7 @@ export interface Run extends RunSummary {
   sources: Source[];
   evidence: Evidence[];
   audit: Audit[];
+  approvals: (Version & { stage: string; actor_id: string; decision: string; comment: string; data: Record<string, unknown> })[];
   jobs: Job[];
   exports: string[];
   serp_snapshots: (Version & {

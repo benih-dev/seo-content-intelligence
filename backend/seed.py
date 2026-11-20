@@ -39,7 +39,11 @@ def main():
         exported = call("/runs", {"project_id": project["id"], "primary_keyword": "berkebun di balkon", "mode": "selected"}, f"{project['id']}:exported")
         for state, stage in [("keyword_review", "keyword"), ("brief_review", "brief"), ("final_review", "final")]:
             wait(exported["id"], state)
-            call(f"/runs/{exported['id']}/approve", {"stage": stage, "comment": "Demo editorial review — source limitations acknowledged"})
+            payload = {}
+            if stage == "final":
+                draft = call(f"/runs/{exported['id']}")["drafts"][-1]
+                payload = {"draft_id": draft["id"], "draft_version": draft["version"]}
+            call(f"/runs/{exported['id']}/approve", {"stage": stage, "payload": payload, "comment": "Demo editorial review — source limitations acknowledged"})
         wait(exported["id"], "exported")
     pending = next((r for r in runs if r["state"] == "keyword_review"), None)
     if not pending:

@@ -129,8 +129,9 @@ Mutating workflow endpoints enqueue a job and return immediately; poll detail ev
   -> `{run_id,job_id,state,queued:true}`.
   Keyword payload `{keyword?:shortlist string,intent?:string}` records intent override.
   Brief payload `{edits?:Partial<Brief>}` creates a new approved version, retaining the original.
-  Final approve requires QA without unresolved hard content issues; YMYL additionally requires
-  `payload:{expert_reviewed:true}` and nonempty comment identifying the human review. This explicitly
+  Final approve requires `payload:{draft_id,draft_version}` identifying the reviewed latest draft;
+  missing or stale identifiers return 409. QA must have no unresolved hard content issues. YMYL additionally requires
+  `expert_reviewed:true` in that payload and nonempty comment identifying the human review. This explicitly
   routes expert/source flags to human accountability; original QA findings are retained with resolution.
   Final `request_revision` creates another draft and returns to QA/final review. It shares the configured
   revision cap with automatic revisions. Mock mode keeps the current Markdown and asks the editor to apply
