@@ -13,6 +13,7 @@ from seoci.diagnostics import classify, context, protect_logging, record_event
 from seoci.models import DiagnosticEvent
 from seoci.providers.keywords import get_keywords
 from seoci.providers.llm import LiteLLMClient
+from seoci.providers.network import cache_bypassed
 from seoci.providers.serp import get_serp
 
 class DiagnosticRoute(APIRoute):
@@ -50,6 +51,7 @@ def test_connection(kind: Literal["llm", "serp", "keyword"]):
     protect_logging(config)
     mode = resolve_settings().public()["modes"][kind]
     token = context.set({"stage": "connection_test", "run_id": None})
+    cache_token = cache_bypassed.set(True)
     try:
         if kind == "llm" and config["llm_model"]:
             LiteLLMClient().complete_json("connection_test", 'Return {"reply":"ok"}.', Probe)
@@ -65,4 +67,5 @@ def test_connection(kind: Literal["llm", "serp", "keyword"]):
         record_event(level="error", message=error["message"], error=error, provider=error["provider"], model=error["model"], status=error["status"])
         return {"ok": False, **error}
     finally:
+        cache_bypassed.reset(cache_token)
         context.reset(token)

@@ -19,6 +19,7 @@ from seoci.db import Session
 from seoci.models import ResponseCache
 
 active_session = ContextVar("provider_session", default=None)
+cache_bypassed = ContextVar("provider_cache_bypassed", default=False)
 
 
 def safe_url(url):
@@ -42,6 +43,8 @@ def request(method, url, *, allow_redirect_response=False, **kwargs):
 
 
 def cached(provider, query, locale, device, fetch):
+    if cache_bypassed.get():
+        return fetch()
     key = hashlib.sha256(json.dumps([provider, query, locale, device], sort_keys=True).encode()).hexdigest()
     def resolve(db):
         row = db.scalar(select(ResponseCache).where(ResponseCache.key == key))

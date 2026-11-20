@@ -138,6 +138,26 @@ def test_unknown_pipeline_failure_is_sanitized(client, project, monkeypatch):
     assert "sk-pipeline-secret" not in json.dumps(result)
 
 
+@pytest.mark.parametrize("kind,provider", [("serp", "serper"), ("serp", "dataforseo"), ("keyword", "dataforseo")])
+def test_connection_probes_bypass_cache_after_credentials_change(client, monkeypatch, kind, provider):
+    client.put("/api/settings", json={f"{kind}_provider": provider, "serper_api_key": "valid-probe-key", "dataforseo_login": "owner", "dataforseo_password": "valid-probe-password"})
+    def respond(method, url, **kwargs):
+        if kwargs.get("headers", {}).get("X-API-KEY") == "invalid-probe-key" or kwargs.get("auth", (None, None))[1] == "invalid-probe-password":
+            raise status_error(401)
+        result = [{"country_iso_code": "US", "location_type": "country", "location_code": 2840}] if "/locations/" in url else []
+        return httpx.Response(200, json={"organic": [], "tasks": [{"status_code": 20000, "result": result}]})
+    request = Mock(side_effect=respond)
+    monkeypatch.setattr(serp, "request", request)
+    monkeypatch.setattr(network, "request", request)
+    assert client.post(f"/api/settings/test/{kind}").json()["ok"]
+    calls = request.call_count
+    client.put("/api/settings", json={"serper_api_key": "invalid-probe-key", "dataforseo_password": "invalid-probe-password"})
+    result = client.post(f"/api/settings/test/{kind}").json()
+    assert request.call_count > calls
+    assert not result["ok"] and result["category"] == "auth"
+    assert not network.cache_bypassed.get()
+
+
 def test_python_event_logging(client, caplog):
     with caplog.at_level(logging.INFO):
         record_event(message="Provider call succeeded", provider="test")
