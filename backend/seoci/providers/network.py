@@ -3,6 +3,7 @@ import ipaddress
 import json
 import socket
 import time
+from contextvars import ContextVar
 from urllib.parse import urlparse
 
 import httpx
@@ -12,6 +13,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from seoci.config import settings
 from seoci.db import Session
 from seoci.models import ResponseCache
+
+active_session = ContextVar("provider_session", default=None)
 
 
 def safe_url(url):
@@ -35,7 +38,7 @@ def request(method, url, **kwargs):
 
 def cached(provider, query, locale, device, fetch):
     key = hashlib.sha256(json.dumps([provider, query, locale, device], sort_keys=True).encode()).hexdigest()
-    with Session() as db:
+    def resolve(db):
         row = db.scalar(select(ResponseCache).where(ResponseCache.key == key))
         if row and row.expires_at > time.time():
             return row.data
@@ -44,6 +47,12 @@ def cached(provider, query, locale, device, fetch):
             row.data, row.expires_at = data, time.time() + settings.cache_ttl_seconds
         else:
             db.add(ResponseCache(key=key, data=data, expires_at=time.time() + settings.cache_ttl_seconds))
+        db.flush()
+        return data
+    if active_session.get() is not None:
+        return resolve(active_session.get())
+    with Session() as db:
+        data = resolve(db)
         db.commit()
         return data
 

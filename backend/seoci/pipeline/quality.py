@@ -1,0 +1,78 @@
+import re
+from urllib.parse import urlparse
+
+DIMENSIONS = ["Intent satisfaction", "Accuracy & evidence", "Original value", "Editorial quality",
+              "On-page completeness", "Trust & accountability"]
+WEIGHTS = {"blog_topic_fit": .25, "intent_fit": .20, "serp_attainability_gap": .20,
+           "business_value": .15, "demand_signals": .10, "data_confidence": .10}
+
+
+def opportunity(metrics, serp):
+    available = metrics.get("volume") is not None
+    scores = {"blog_topic_fit": 65, "intent_fit": 70, "serp_attainability_gap": 55 if serp else None,
+              "business_value": 60, "demand_signals": min(100, metrics["volume"] / 100) if available else None,
+              "data_confidence": 70 if available and serp else 30}
+    dims = {key: {"score": score, "weight": WEIGHTS[key], "reason": "Unavailable provider data" if score is None else
+                  "Editorial heuristic, not a Google metric or ranking prediction", "confidence": .65 if available and serp else .3}
+            for key, score in scores.items()}
+    total_weight = sum(WEIGHTS[k] for k, v in scores.items() if v is not None)
+    return {"dimensions": dims, "score": round(sum(WEIGHTS[k] * v for k, v in scores.items() if v is not None) / total_weight, 1),
+            "confidence": .65 if available and serp else .3, "not_a_ranking_prediction": True}
+
+
+def overlap(keyword, inventory):
+    tokens = set(re.findall(r"\w+", keyword.lower()))
+    return [{"url": x.url, "reason": "Shared keyword/title/slug tokens; consider updating existing article",
+             "recommendation": "update_existing_or_differentiate"} for x in inventory
+            if len(tokens & set(re.findall(r"\w+", (x.title + " " + x.slug).lower()))) / max(1, len(tokens)) >= .5]
+
+
+def ymyl(keyword):
+    return bool(re.search(r"\b(financ\w*|invest\w*|health|medic\w*|legal|safety|kesehatan|obat|hukum|keuangan|dana|tabungan|diet|penyakit|emergency fund)\b", keyword.lower()))
+
+
+def check_article(body, metadata, evidence, inventory, keyword, expert=False):
+    findings = []
+    def add(dim, severity, location, finding, action):
+        findings.append(dict(dimension=dim, severity=severity, location=location, finding=finding, action=action))
+    source_urls = {x["url"] for x in evidence}
+    for i, line in enumerate(body.splitlines(), 1):
+        if line.startswith("- [") and any(url in line for url in source_urls):
+            continue
+        # Ignore table separators, headings, URL-only references and ordered list markers.
+        text = re.sub(r"https?://[^\s)]+", "", re.sub(r"^\d+\.\s", "", line))
+        if re.search(r"\b\d+(?:[.,]\d+)?\s*(?:%|persen|percent|juta|million|days|hari|tahun|years)?", text):
+            supported = any(url in line and str(ev.get("claim", "")) in line for ev in evidence for url in [ev["url"]])
+            if not supported:
+                add("Accuracy & evidence", "blocker", f"line:{i}", "Unsupported numeric claim", "Add evidence for this exact claim or remove it")
+    previous = 0
+    for i, line in enumerate(body.splitlines(), 1):
+        match = re.match(r"^(#{1,6}) ", line)
+        if match:
+            level = len(match[1])
+            if (previous == 0 and level != 1) or level > previous + 1:
+                add("On-page completeness", "major", f"line:{i}", "Heading hierarchy skips a level", "Use sequential heading levels")
+            previous = level
+    if len(re.findall(r"^# ", body, re.M)) != 1:
+        add("On-page completeness", "major", "headings", "Expected exactly one H1", "Use one descriptive H1")
+    if not 70 <= len(metadata.get("meta_description", "")) <= 160:
+        add("On-page completeness", "major", "meta_description", "Meta description length outside editorial range", "Use a concise description of 70–160 characters")
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", metadata.get("slug", "")):
+        add("On-page completeness", "major", "slug", "Invalid slug", "Use lowercase hyphen-separated words")
+    known = set(inventory)
+    hosts = {urlparse(x).hostname for x in known}
+    for url in re.findall(r"\]\((https?://[^)]+)\)", body):
+        if urlparse(url).hostname in hosts and url not in known and url not in source_urls:
+            add("On-page completeness", "major", url, "Unknown internal link", "Choose an existing inventory URL")
+    words = body.split()
+    if body.lower().count(keyword.lower()) * max(1, len(keyword.split())) / max(1, len(words)) > .07:
+        add("Editorial quality", "major", "body", "Possible keyword stuffing", "Remove forced repetitions")
+    if len(words) < 200:
+        add("Original value", "blocker", "body", "Draft is too shallow to evaluate as a complete guide", "Develop the approved sections and examples")
+    if expert:
+        add("Trust & accountability", "blocker", "article", "Expert review required", "Provide explicit expert_reviewed approval after a qualified human review")
+        if not any(ev.get("review_status") == "verified" for ev in evidence):
+            add("Accuracy & evidence", "blocker", "sources", "YMYL sources need human verification", "Verify authoritative topic sources and record reviewer decision")
+    return {"dimensions": DIMENSIONS, "findings": findings,
+            "status": "blocked" if any(x["severity"] == "blocker" for x in findings) else "needs_revision" if any(x["severity"] == "major" for x in findings) else "pass",
+            "expert_review_required": expert}
