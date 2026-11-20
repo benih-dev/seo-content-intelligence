@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import httpx
 import litellm
 import pytest
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import select, func
 
 from tests.conftest import new_run, detail
@@ -23,7 +24,7 @@ def status_error(status, message="provider error"):
 
 @pytest.mark.parametrize("exc,category,status", [
     (status_error(401), "auth", 401), (status_error(403), "auth", 403),
-    (status_error(404), "model_not_found", 404), (status_error(400, "unsupported model"), "model_not_found", 400),
+    (status_error(404), "model_not_found", 404), (RuntimeError("unsupported model"), "model_not_found", None),
     (httpx.ConnectError("DNS failed"), "unreachable", None), (httpx.ReadTimeout("too slow"), "timeout", None),
     (status_error(429), "rate_limit", 429), (status_error(400, "response_format"), "bad_request", 400),
     (json.JSONDecodeError("bad", "private output", 0), "invalid_output", None),
@@ -47,6 +48,22 @@ def test_redactor():
     safe = redact(message, {"llm_api_key": key, "gsc_service_account_json": account})
     for secret in (key, "sk-secret-token", "access-token", "header-secret", "second-secret", account, "PRIVATE-KEY-CONTENT", "private@example.com", "query-secret", "user:pass"):
         assert secret not in safe
+
+
+def test_typed_classification_precedes_rejected_content():
+    class Output(BaseModel):
+        count: int
+    with pytest.raises(ValidationError) as invalid:
+        Output.model_validate({"count": "api_key invalid quota"})
+    errors = [(invalid.value, "invalid_output"),
+              (json.JSONDecodeError("api_key rejected", "", 0), "invalid_output"),
+              (httpx.ReadTimeout("api_key missing"), "timeout"),
+              (httpx.ConnectError("api_key missing"), "unreachable"),
+              (status_error(429, "api_key missing"), "rate_limit"),
+              (status_error(400, "unsupported model api_key quota"), "bad_request"),
+              (status_error(401, "quota exceeded"), "auth")]
+    for exc, expected in errors:
+        assert classify(exc, config={})["category"] == expected
 
 
 @pytest.mark.parametrize("account", ["null", "[]", '"text"', "true", "1", "{invalid", '{"private_key": ["nested"]}'])
@@ -145,6 +162,8 @@ def test_connection_probes_bypass_cache_after_credentials_change(client, monkeyp
         if kwargs.get("headers", {}).get("X-API-KEY") == "invalid-probe-key" or kwargs.get("auth", (None, None))[1] == "invalid-probe-password":
             raise status_error(401)
         result = [{"country_iso_code": "US", "location_type": "country", "location_code": 2840}] if "/locations/" in url else [{"items": [{"type": "organic", "rank_group": 1, "url": "https://example.com", "title": "Gardening"}]}]
+        if "/search_volume/" in url:
+            result = [{"keyword": "gardening", "search_volume": 100}]
         return httpx.Response(200, json={"organic": [{"position": 1, "link": "https://example.com", "title": "Gardening"}], "tasks": [{"status_code": 20000, "result": result}]})
     request = Mock(side_effect=respond)
     monkeypatch.setattr(serp, "request", request)

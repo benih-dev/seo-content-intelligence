@@ -102,25 +102,55 @@ def classify(exc, provider="pipeline", model="", endpoint="", config=None):
     kind = type(exc).__name__.lower()
     status = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
     status = status if isinstance(status, int) else None
-    if status in (401, 403) or any(x in kind + raw for x in ("authentication", "permissiondenied", "invalid api key", "api key is not configured", "api_key", "service-account json", "invalid_grant", "invalid_client", "refresherror", "malformederror")):
+    category = None
+    if isinstance(exc, (ValidationError, json.JSONDecodeError)):
+        category = "invalid_output"
+    elif isinstance(exc, (httpx.TimeoutException, TimeoutError)) or "timeout" in kind:
+        category = "timeout"
+    elif isinstance(exc, (httpx.ConnectError, ConnectionError)) or any(x in kind for x in ("connection", "transport", "dns")):
+        category = "unreachable"
+    elif status in (401, 403) or any(x in kind for x in ("authentication", "permissiondenied", "refresherror", "malformederror")):
+        category = "auth"
+    elif status == 404 or "notfound" in kind:
+        category = "model_not_found"
+    elif status == 429 or "ratelimit" in kind:
+        category = "rate_limit"
+    elif status in (400, 405, 415, 422) or "badrequest" in kind:
+        category = "bad_request"
+    if category is None:
+        if "invalid model output" in raw:
+            category = "invalid_output"
+        elif any(x in raw for x in ("authentication", "permissiondenied", "invalid api key", "api key is not configured", "api_key", "service-account json", "invalid_grant", "invalid_client")):
+            category = "auth"
+        elif any(x in raw for x in ("model not found", "model_not_found", "unknown model", "model does not exist", "unsupported model")):
+            category = "model_not_found"
+        elif raw == "run budget exhausted" or any(x in raw for x in ("quota", "rate limit")):
+            category = "rate_limit"
+        elif "timed out" in raw:
+            category = "timeout"
+        elif any(x in raw for x in ("connection error", "connection refused", "name or service not known", "dns resolution")):
+            category = "unreachable"
+        elif "bad request" in raw:
+            category = "bad_request"
+    if category == "auth":
         category, explanation, hint = "auth", "Authentication failed or credentials are missing.", "Check the API key or service-account access in Settings."
-    elif status == 404 or any(x in raw for x in ("model not found", "model_not_found", "unknown model", "model does not exist", "unsupported model")):
+    elif category == "model_not_found":
         category, explanation, hint = "model_not_found", "The model or endpoint is not available.", "Check the model name and whether this endpoint supports it."
-    elif raw == "run budget exhausted":
+    elif category == "rate_limit" and raw == "run budget exhausted":
         category, explanation, hint = "rate_limit", "Run budget exhausted.", "Increase RUN_BUDGET_USD or reduce provider usage before retrying."
-    elif status == 429 or "ratelimit" in kind or any(x in raw for x in ("quota", "rate limit")):
+    elif category == "rate_limit":
         category, explanation, hint = "rate_limit", "Rate limit or quota exceeded.", "Wait before retrying; check provider quota and billing."
-    elif isinstance(exc, (httpx.TimeoutException, TimeoutError)) or "timeout" in kind or "timed out" in raw:
+    elif category == "timeout":
         category, explanation, hint = "timeout", "The provider request timed out.", "Retry later or check the endpoint and network timeout."
         if status == 500:
             status = None
-    elif isinstance(exc, (httpx.ConnectError, ConnectionError)) or any(x in kind for x in ("connection", "transport", "dns")) or any(x in raw for x in ("connection error", "connection refused", "name or service not known", "dns resolution")):
+    elif category == "unreachable":
         category, explanation, hint = "unreachable", f"Cannot connect to {safe_host(endpoint) if endpoint else 'the provider host'}.", "Check the host and network. For OpenAI-compatible APIs, ensure LLM_API_BASE ends in /v1."
         if status == 500:
             status = None
-    elif isinstance(exc, (ValidationError, json.JSONDecodeError)) or "invalid model output" in raw:
+    elif category == "invalid_output":
         category, explanation, hint = "invalid_output", "The provider returned invalid or non-JSON output.", "Use a model supporting JSON output and retry."
-    elif status in (400, 405, 415, 422) or "badrequest" in kind or "bad request" in raw:
+    elif category == "bad_request":
         category, explanation, hint = "bad_request", "The provider rejected the request.", "Check endpoint compatibility, including response_format=json_object, and model options."
     else:
         category, explanation, hint = "unknown", "The operation failed.", "Check provider configuration and Logs, then retry."
