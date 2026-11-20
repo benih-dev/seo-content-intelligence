@@ -63,6 +63,18 @@ def available_slug(slug, domain, inventory):
     raise RuntimeError("Could not allocate a unique article slug")
 
 
+def publisher_label(value, recorded):
+    if value.casefold() in {name.strip().casefold() for name in recorded if name}:
+        return True
+    if re.fullmatch(r"(?:https?://)?(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}/?", value, re.I):
+        return True
+    words = value.split()
+    return 1 <= len(words) <= 6 and any(word[0].isupper() for word in words) and all(
+        word in {"of", "the", "and", "for", "&", "di", "dan"}
+        or re.fullmatch(r"[A-Z][A-Za-z'’&.-]*|\d+-[A-Z]+", word)
+        for word in words)
+
+
 def check_article(body, metadata, evidence, inventory, keyword, expert=False, project_domain=None):
     findings = []
     def add(dim, severity, location, finding, action):
@@ -73,7 +85,9 @@ def check_article(body, metadata, evidence, inventory, keyword, expert=False, pr
         reference = re.match(r"^\s*[-*+]\s+\[[^\]]+\]\((https?://[^)]+)\)", text)
         if reference and reference[1] in source_urls:
             text = text[reference.end():]
-            text = re.sub(r"^\s*[—–-]\s*[^;%\n]+;\s*(?:retrieved|diakses)\s+\d{4}-\d{2}-\d{2}\s*$", "", text, flags=re.I)
+            tail = re.fullmatch(r"\s*[—–-]\s*([^;\n]+);\s*(?:retrieved|diakses)\s+\d{4}-\d{2}-\d{2}\s*", text, flags=re.I)
+            if tail and publisher_label(tail[1].strip(), [ev.get("publisher") for ev in evidence if ev["url"] == reference[1]]):
+                text = ""
         text = re.sub(r"https?://[^\s)]+", "", re.sub(r"^\d+\.\s", "", text))
         text = re.sub(r"^#{1,6}\s+(?:(?:step|langkah|tahap)\s+\d+(?:[:.)-]\s*|\s+|$)|\d+[.)]\s+)", "", text, flags=re.I)
         if re.search(r"\b\d+(?:[.,]\d+)?\s*(?:%|persen|percent|juta|million|days|hari|tahun|years)?", text):

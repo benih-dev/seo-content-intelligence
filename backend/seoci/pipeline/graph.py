@@ -242,7 +242,8 @@ def optimizing(db, run):
 def qa(db, run):
     row = latest(db, ArticleDraft, run.id)
     ctx = context(db, run)
-    evidence = [{**x, "url": x["data"].get("url")} for x in ctx["evidence"]]
+    publishers = {source["id"]: source["publisher"] for source in ctx["sources"]}
+    evidence = [{**x, "url": x["data"].get("url"), "publisher": publishers.get(x["source_id"])} for x in ctx["evidence"]]
     result = check_article(row.body_md, row.metadata_json, evidence, ctx["inventory"], run.primary_keyword, ymyl(run.primary_keyword), project_domain=ctx["domain"])
     review = llm_call(db, run, "qa", QA, {"body_md": row.body_md, "metadata": row.metadata_json})
     result["findings"] += review["findings"]
