@@ -44,7 +44,7 @@ def ymyl(keyword):
     return bool(re.search(r"\b(financ\w*|invest\w*|health|medic\w*|legal|safety|kesehatan|obat|hukum|keuangan|dana|tabungan|diet|penyakit|emergency fund)\b", keyword.lower()))
 
 
-def check_article(body, metadata, evidence, inventory, keyword, expert=False):
+def check_article(body, metadata, evidence, inventory, keyword, expert=False, project_domain=None):
     findings = []
     def add(dim, severity, location, finding, action):
         findings.append(dict(dimension=dim, severity=severity, location=location, finding=finding, action=action))
@@ -77,8 +77,10 @@ def check_article(body, metadata, evidence, inventory, keyword, expert=False):
         add("On-page completeness", "major", "slug", "Invalid slug", "Use lowercase hyphen-separated words")
     known = set(inventory)
     hosts = {urlparse(x).hostname for x in known}
+    if project_domain:
+        hosts.add(urlparse(project_domain).hostname)
     for url in re.findall(r"\]\((https?://[^)]+)\)", body):
-        if urlparse(url).hostname in hosts and url not in known and url not in source_urls:
+        if urlparse(url).hostname in hosts and url not in known:
             add("On-page completeness", "major", url, "Unknown internal link", "Choose an existing inventory URL")
     words = body.split()
     if body.lower().count(keyword.lower()) * max(1, len(keyword.split())) / max(1, len(words)) > .07:

@@ -40,7 +40,7 @@ def context(db, run):
     p = run.context.get("project") or row_dict(db.get(Project, run.project_id))
     records = list(db.scalars(select(KeywordRecord).where(KeywordRecord.run_id == run.id, KeywordRecord.selected.is_(True))))
     brief = latest(db, ContentBrief, run.id)
-    return {"keyword": run.primary_keyword, "language": p["language"], "audience": p["audience"],
+    return {"keyword": run.primary_keyword, "language": p["language"], "audience": p["audience"], "domain": p["domain"],
             "niche": p["niche"], "voice_profile": p["voice_profile"], "rules": p["rules"],
             "business_objective": p["business_objective"], "intent": records[0].intent if records else "informational",
             "inventory": [x.url for x in db.scalars(select(SiteContentItem).where(SiteContentItem.project_id == run.project_id))],
@@ -241,7 +241,7 @@ def qa(db, run):
     row = latest(db, ArticleDraft, run.id)
     ctx = context(db, run)
     evidence = [{**x, "url": x["data"].get("url")} for x in ctx["evidence"]]
-    result = check_article(row.body_md, row.metadata_json, evidence, ctx["inventory"], run.primary_keyword, ymyl(run.primary_keyword))
+    result = check_article(row.body_md, row.metadata_json, evidence, ctx["inventory"], run.primary_keyword, ymyl(run.primary_keyword), project_domain=ctx["domain"])
     review = llm_call(db, run, "qa", QA, {"body_md": row.body_md, "metadata": row.metadata_json})
     result["findings"] += review["findings"]
     result["summary"] = review["summary"]
