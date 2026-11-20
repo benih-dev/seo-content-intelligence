@@ -18,6 +18,8 @@ from seoci.models import AppSetting, AuditEvent, now
 
 
 def property_host(host):
+    if any(label.startswith("-") or label.endswith("-") for label in host.split(".")):
+        raise ValueError("Use a valid Search Console property hostname")
     host = host.encode("idna").decode("ascii").lower()
     labels = host.split(".")
     if (len(host) > 253 or len(labels) < 2
