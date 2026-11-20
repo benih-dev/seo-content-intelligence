@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { normalizeWebsiteUrl } from "@/lib/project-url";
 import type { Project, ProjectInput } from "@/lib/types";
 import { ErrorNotice, Panel, Submit } from "./ui";
 
@@ -55,12 +56,7 @@ function field(key: Exclude<keyof ProjectInput, "rules">, value: string) {
       if (![form.name, form.domain, form.niche, form.audience].every((text) => text.trim())) {
         throw new Error("Enter a project name, website domain, niche, and audience.");
       }
-      const domain = form.domain.trim();
-      const websiteUrl = domain.includes("://") ? domain : `https://${domain}`;
-      const website = URL.canParse(websiteUrl) ? new URL(websiteUrl) : null;
-      if (!website || !["https:", "http:"].includes(website.protocol) || website.username || website.password || /\s/.test(domain)) {
-        throw new Error("Enter a website domain such as example.com or https://example.com.");
-      }
+      const domain = normalizeWebsiteUrl(form.domain);
       let nextRules: ProjectInput["rules"] = {};
       if (hasStructuredRules) {
         try {
@@ -74,7 +70,7 @@ function field(key: Exclude<keyof ProjectInput, "rules">, value: string) {
       if (rules.trim()) nextRules.instructions = rules.trim();
       const result = await api<Project>(
         project ? `/projects/${project.id}` : "/projects",
-        { ...form, domain: website.origin, rules: nextRules },
+        { ...form, domain, rules: nextRules },
         project ? "PUT" : "POST",
       );
       if (project) {

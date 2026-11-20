@@ -87,6 +87,16 @@ def test_link_keys_keep_queries_and_tolerate_malformed_urls():
                                                         ("https://[example.com/broken", "search_suggestion")]
 
 
+def test_inventory_link_keys_preserve_path_and_query_case():
+    from types import SimpleNamespace
+
+    from seoci.pipeline.quality import annotate_internal_links
+    urls = ["https://example.com/Guide?ref=A", "https://example.com/guide?ref=A", "https://example.com/guide?ref=a"]
+    inventory = [SimpleNamespace(url=url, title=url, slug="") for url in urls]
+    links = annotate_internal_links([{"url": url.replace("https://example.com", "HTTPS://EXAMPLE.COM")} for url in urls], inventory)
+    assert [(link["url"], link["status"]) for link in links] == [(url, "inventory") for url in urls]
+
+
 def test_outline_text_fields_are_coerced_or_rejected():
     import pytest
     from pydantic import ValidationError
