@@ -23,19 +23,11 @@ runs the offline acceptance suite. OpenAPI request schemas are at `/openapi.json
 
 ## Configuration
 
-Environment variables or a local ignored `.env`:
-
-| Variable | Default | Meaning |
-|---|---|---|
-| DATABASE_URL | sqlite:///./data/seoci.db | SQLAlchemy URL; PostgreSQL: `postgresql+psycopg://user:pass@localhost/seoci` |
-| LLM_MODEL | empty | Empty selects deterministic mock; otherwise LiteLLM model identifier. Set the provider's usual API key environment variable, e.g. OPENAI_API_KEY. |
-| SERP_PROVIDER | mock | `mock` or `dataforseo`; real keyword and research adapters follow the same setting |
-| DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD | empty | DataForSEO credentials, never stored in project records |
-| MAX_REVISION_CYCLES | 2 | Maximum automatic QA revisions |
-| RUN_BUDGET_USD | 2 | Refuse the next LLM task once recorded spend reaches this cap |
-| CACHE_TTL_SECONDS | 3600 | Provider response cache lifetime |
-| NETWORK_TIMEOUT | 20 | Per-request network timeout in seconds |
-| WORKER_POLL_SECONDS | 0.5 | Queue poll interval |
+Lihat [konfigurasi lingkungan di README utama](../README.md#konfigurasi-lingkungan)
+untuk seluruh variabel, default, pemilihan mock/live, kredensial provider dan GitHub,
+serta perbedaan `.env` lokal dan substitusi Compose. Jalankan API, worker dan migrasi
+dari `backend/` dengan settings yang sama. Panduan deployment lokal, Compose dan
+build produksi juga dipusatkan di [README utama](../README.md).
 
 Mock mode intentionally leaves volume/competition unavailable. SERP entries are explicitly labeled demo
 results. Its long-form articles contain qualitative guidance, a comparison table, hypothetical worked
@@ -51,7 +43,7 @@ location names also work. No synthetic fallback occurs on provider error.
 
 Budget checks occur before tasks; the last call may exceed the cap (provider billing is post-response).
 Network operations have bounded timeouts and transport/status retries; cache uses provider/query/locale/device.
-Sitemap downloads are bounded to the project host and public HTTP(S), without redirects; per-URL errors
+Sitemap downloads are bounded to the project host and public HTTP(S), with bounded same-site redirects; per-URL errors
 are returned. Public-host validation is defense in depth, not a substitute for a production egress firewall
 (DNS rebinding protection belongs there). Optional source text fetching is off by default.
 
@@ -60,7 +52,8 @@ are returned. Public-host validation is defense in depth, not a substitute for a
 JSON unless noted. All ids are UUID strings; times are ISO-8601 UTC strings. Errors:
 `{"detail":"message"}`; validation 422 uses FastAPI's standard `detail` array. 404 missing object,
 409 invalid state/active job/idempotency conflict. Collection endpoints return arrays, not envelopes.
-Mutating workflow endpoints enqueue a job and return immediately; poll detail every two seconds.
+Mutating pipeline commands enqueue a job and return immediately; poll detail every two seconds.
+GitHub publishing is a synchronous connector request, not a worker job.
 `POST /approve` still returns the **current** gate state, not an optimistic next state.
 
 ### Project and inventory
@@ -69,7 +62,8 @@ Mutating workflow endpoints enqueue a job and return immediately; poll detail ev
 - `GET /api/projects` -> `Project[]`.
 - `POST /api/projects` (201), `PUT /api/projects/{id}` -> `Project`.
   Input: `{name,domain,niche,audience,language?:"id",country?:"ID",voice_profile?:string,
-  rules?:object,business_objective?:string}`. First four required; a bare domain defaults to HTTPS.
+  rules?:object,publishing?:{github_repo?,base_branch?:"main",content_dir?:"src/content/blog",file_extension?:"md"},
+  business_objective?:string}`. First four required; a bare domain defaults to HTTPS.
   The web form stores plain-text editorial rules in `rules.instructions`.
   Project adds `{id,version,created_at}`. PUT is full replacement, increments profile version;
   runs retain their own project snapshot.
@@ -94,7 +88,7 @@ Mutating workflow endpoints enqueue a job and return immediately; poll detail ev
   In discovery, `primary_keyword` is the seed. Same key + body returns existing run; different body -> 409.
 - `Run`: `{id,project_id,mode,primary_keyword,locale,state,context,error,resume_state,
   revision_count,created_at,updated_at,idempotency_key,request_fingerprint}`.
-- `GET /api/runs/{id}` -> Run plus `revision_limit`, `mock_revision` and:
+- `GET /api/runs/{id}` -> Run plus `revision_limit`, `mock_revision`, `github_publish` (null or saved GitHub PR result) and:
   - `artifacts:[{id,run_id,stage,version,data,created_at}]`: context, keyword research (`data.shortlist`),
     strategy (`data.overlap_warnings`, `ymyl`, `expert_review_label`), brief, evidence, drafting, SEO, QA and export.
   - `keywords:[{id,run_id,version,keyword,locale,intent,score,confidence,selected,data,created_at}]`.
@@ -134,8 +128,8 @@ Mutating workflow endpoints enqueue a job and return immediately; poll detail ev
   `expert_reviewed:true` in that payload and nonempty comment identifying the human review. This explicitly
   routes expert/source flags to human accountability; original QA findings are retained with resolution.
   Final `request_revision` creates another draft and returns to QA/final review. It shares the configured
-  revision cap with automatic revisions. Mock mode keeps the current Markdown and asks the editor to apply
-  feedback manually. Keyword/brief edits use approve.
+  revision cap with automatic revisions. Mock mode preserves the current Markdown and appends a demo checklist
+  when instructions exist; substantive edits remain manual. Keyword/brief edits use approve.
 - `PUT /api/runs/{id}/draft` (202): `{body_md,metadata_json?:SEO}` -> `{draft_id,version,job_id,state}`.
   Only final_review/blocked; creates a version, syncs the SEO H1 and queues QA. A failed check leaves
   the edited version available for correction instead of triggering an automatic rewrite. Approved/exported articles are immutable.
@@ -147,13 +141,19 @@ Mutating workflow endpoints enqueue a job and return immediately; poll detail ev
   Only after final approval and worker export completion; otherwise 409. Markdown preserves body formatting;
   HTML disables embedded HTML for safe previews; JSON includes stable ids, metadata, briefs, sources,
   evidence_ledger, qa_report, versions, and article Markdown/HTML (`schema_version:"1.0"`).
+- `POST /api/runs/{id}/publish/github`, no required body -> `{pr_url,pr_number,branch,path}`.
+  Requires `article_ready` or `exported`, server GitHub credentials and project publishing settings.
+  Creates an Astro Markdown file on a separate branch and opens a PR, without merging or publishing the site.
+  Repeating a completed request returns its saved result. Existing target files are rejected;
+  partial GitHub failures may leave a branch requiring inspection before retry. See
+  [publishing setup](../README.md#mengirim-artikel-ke-repositori-blog-github).
 
 ## Architecture and PRD mapping
 
 `api` validates commands and queues jobs. `worker` claims with SQLite write lock or PostgreSQL
 `FOR UPDATE SKIP LOCKED`, then executes LangGraph using thread id = run id. Each stage commits typed
 records, a uniquely keyed artifact and audit events in one transaction. LangGraph checkpoints before
-and after stages; committed artifacts are reused on replay. Stale running jobs can be reclaimed after
+and after stages; committed artifacts are reused on replay. Running jobs refresh a heartbeat; leases without a refresh can be reclaimed after
 ten minutes; operate one worker per local SQLite DB. PostgreSQL supports concurrent run claims.
 Retry never recreates a run; explicit create idempotency prevents double-click duplication.
 
