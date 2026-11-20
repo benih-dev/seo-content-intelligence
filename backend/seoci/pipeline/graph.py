@@ -12,7 +12,7 @@ from sqlalchemy import select
 from seoci.config import settings
 from seoci.db import Session
 from seoci.export import build_exports, render_md, row_dict
-from seoci.models import (ArticleDraft, AuditEvent, ContentBrief, EvidenceItem, KeywordMetricSnapshot,
+from seoci.models import (ApprovalEvent, ArticleDraft, AuditEvent, ContentBrief, EvidenceItem, KeywordMetricSnapshot,
                           Job, KeywordRecord, Project, QAReview, ResearchSource, SERPResult, SERPSnapshot,
                           SiteContentItem, StageArtifact, WorkflowRun, now)
 from seoci.pipeline.quality import check_article, opportunity, overlap, ymyl
@@ -214,7 +214,15 @@ def drafting(db, run):
         transition(db, run, "drafting", reason="Apply bounded revision")
     old = latest(db, ArticleDraft, run.id)
     version = old.version + 1 if old else 1
-    data = llm_call(db, run, "revise" if old else "draft", Draft, {"previous_draft": old.body_md if old else None})
+    feedback = {"previous_draft": old.body_md if old else None}
+    if old:
+        review = latest(db, QAReview, run.id)
+        approval = db.scalar(select(ApprovalEvent).where(ApprovalEvent.run_id == run.id,
+                             ApprovalEvent.stage == "final", ApprovalEvent.decision == "request_revision")
+                             .order_by(ApprovalEvent.created_at.desc()).limit(1))
+        feedback.update(reviewer_comment=approval.comment if approval else None,
+                        qa_findings=review.data.get("findings", []) if review else [])
+    data = llm_call(db, run, "revise" if old else "draft", Draft, feedback)
     row = ArticleDraft(run_id=run.id, version=version, body_md=data["body_md"], body_html=render_md(data["body_md"]), data={"change_log": data["change_log"]})
     db.add(row)
     db.flush()
