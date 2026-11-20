@@ -119,6 +119,10 @@ export function KeywordPanel({
           }
         >
           <h3 className="keyword-title">{candidate.keyword}</h3>
+          {metric.provider === "search_console" && <div className="notice">
+            <strong>{metric.provenance}</strong><p>{metric.note}</p>
+            <p>Impressions (demand): {metric.impressions ?? "Unavailable"} · Clicks: {metric.clicks ?? "Unavailable"} · CTR: {metric.ctr == null ? "Unavailable" : percent(metric.ctr)} · Average position: {metric.position ?? "Unavailable"}</p>
+          </div>}
           <div className="metric-grid">
             <div>
               <small>Search volume</small>

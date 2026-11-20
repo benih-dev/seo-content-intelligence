@@ -20,6 +20,8 @@ def meaningful_tokens(text):
 
 def opportunity(metrics, serp, keyword="", project=None, intent=None):
     available = metrics.get("volume") is not None
+    own_site = metrics.get("provider") == "search_console" and metrics.get("impressions") is not None
+    demand = metrics.get("volume") if available else metrics.get("impressions") if own_site else None
     project = project or {}
     tokens = meaningful_tokens(keyword)
     niche_tokens = meaningful_tokens(project.get("niche", "") + " " + project.get("audience", ""))
@@ -28,8 +30,8 @@ def opportunity(metrics, serp, keyword="", project=None, intent=None):
     business = len(tokens & business_tokens) / max(1, len(tokens))
     scores = {"blog_topic_fit": round(50 + 50 * fit), "intent_fit": 75 if intent == "informational" else 50,
               "serp_attainability_gap": None,
-              "business_value": round(50 + 50 * business), "demand_signals": min(100, metrics["volume"] / 100) if available else None,
-              "data_confidence": 70 if available and serp else 30}
+              "business_value": round(50 + 50 * business), "demand_signals": min(100, demand / 100) if demand is not None else None,
+              "data_confidence": 40 if own_site else 70 if available and serp else 30}
     reasons = {"blog_topic_fit": f"Keyword tokens overlapping niche/audience: {', '.join(sorted(tokens & niche_tokens)) or 'none; human fit review needed'}",
                "intent_fit": f"Intent {intent or 'unconfirmed'} compared with an educational blog format",
                "serp_attainability_gap": "Live snapshot exists; neutral starting score pending editorial competitor assessment",
@@ -37,6 +39,8 @@ def opportunity(metrics, serp, keyword="", project=None, intent=None):
                "demand_signals": "Provider volume scaled for internal prioritization; not a ranking estimate",
                "data_confidence": "Completeness of identified demand and live SERP data"}
     reasons["serp_attainability_gap"] = "Unavailable: SERP snippets alone do not establish competitor strength or content gaps; excluded from total"
+    if own_site:
+        reasons["demand_signals"] = "Search Console (own site): 90-day impressions scaled for prioritization, not search volume"
     dims = {key: {"score": score, "weight": WEIGHTS[key], "reason": reasons[key] if key == "serp_attainability_gap" else "Unavailable provider data" if score is None else
                   reasons[key], "confidence": .65 if key in {"demand_signals", "data_confidence"} and available and serp else .3}
             for key, score in scores.items()}

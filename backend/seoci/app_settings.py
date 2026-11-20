@@ -7,8 +7,8 @@ from seoci.config import settings
 from seoci.db import Session
 from seoci.models import AppSetting
 
-PUBLIC_FIELDS = ("llm_model", "llm_api_base", "serp_provider", "dataforseo_login", "github_api_url")
-SECRET_FIELDS = ("llm_api_key", "dataforseo_password", "github_token")
+PUBLIC_FIELDS = ("llm_model", "llm_api_base", "serp_provider", "keyword_provider", "gsc_site_url", "dataforseo_login", "github_api_url")
+SECRET_FIELDS = ("llm_api_key", "dataforseo_password", "github_token", "serper_api_key", "gsc_service_account_json")
 SETTING_FIELDS = (*PUBLIC_FIELDS, *SECRET_FIELDS)
 
 
@@ -20,7 +20,8 @@ class ResolvedSettings:
     def public(self):
         return {**{key: self.values[key] for key in PUBLIC_FIELDS},
                 **{key: {"configured": bool(self.values[key]), "source": self.sources[key]} for key in SECRET_FIELDS},
-                "modes": {"llm": "live" if self.values["llm_model"] else "mock", "serp": self.values["serp_provider"]}}
+                "modes": {"llm": "live" if self.values["llm_model"] else "mock", "serp": self.values["serp_provider"],
+                          "keyword": self.values["keyword_provider"] or ("dataforseo" if self.values["serp_provider"] == "dataforseo" else "mock")}}
 
 
 def resolve_settings(db=None):

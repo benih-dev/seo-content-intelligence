@@ -3,7 +3,7 @@ from typing import Protocol
 from seoci.app_settings import resolve_settings
 from seoci.models import now
 from seoci.providers.demo_topics import topic_sources
-from seoci.providers.network import cached, dfs, dfs_location
+from seoci.providers.network import cached, dfs, dfs_location, request
 
 
 class SerpProvider(Protocol):
@@ -39,5 +39,29 @@ class DataForSEOSerp:
         return cached("dataforseo-serp", query, locale, device, fetch)
 
 
+class SerperSerp:
+    def search(self, query, locale, device="desktop"):
+        language, country = locale.split("-", 1)
+        def fetch():
+            config = resolve_settings().values
+            if not config["serper_api_key"]:
+                raise RuntimeError("Serper API key is not configured")
+            try:
+                data = request("POST", "https://google.serper.dev/search",
+                               headers={"X-API-KEY": config["serper_api_key"]},
+                               json={"q": query, "gl": country.lower(), "hl": language.lower(), "num": 10}).json()
+                rows = [{"rank": item.get("position", index + 1), "url": item["link"],
+                         "title": item["title"], "snippet": item.get("snippet", "")}
+                        for index, item in enumerate(data.get("organic", []))]
+                if not rows:
+                    raise ValueError("No organic results")
+                return {"query": query, "locale": locale, "device": device, "provider": "serper", "captured_at": now(),
+                        "results": rows, "people_also_ask": data.get("peopleAlsoAsk", []),
+                        "related_searches": data.get("relatedSearches", [])}
+            except Exception:
+                raise RuntimeError("Serper request failed; check provider settings and query") from None
+        return cached("serper-serp", query, locale, device, fetch)
+
+
 def get_serp():
-    return DataForSEOSerp() if resolve_settings().values["serp_provider"] == "dataforseo" else MockSerp()
+    return {"dataforseo": DataForSEOSerp, "serper": SerperSerp}.get(resolve_settings().values["serp_provider"], MockSerp)()
