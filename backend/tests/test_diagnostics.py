@@ -214,6 +214,30 @@ def test_wrapped_litellm_connection_error():
     assert "127.0.0.1" in result["message"]
 
 
+@pytest.mark.parametrize("body", ["Empty or invalid response from LLM endpoint", "<!doctype html><html>website sk-private-body</html>", "<html>website</html>"])
+def test_html_endpoint_classification_preserves_llm_identity(body):
+    exc = litellm.InternalServerError(message=f"OpenAIException - {body}", model="openai/DeepSeek-V4-Flash", llm_provider="openai")
+    result = classify(exc, config={})
+    assert result["category"] == "bad_endpoint"
+    assert result["provider"] == "openai" and result["model"] == "openai/DeepSeek-V4-Flash"
+    assert "LLM endpoint returned HTML/non-JSON instead of an API response" in result["message"]
+    assert result["hint"] == "LLM_API_BASE likely needs the API path, e.g. https://host/v1"
+    assert "sk-private-body" not in json.dumps(result) and "<html" not in json.dumps(result)
+
+
+def test_html_endpoint_failure_survives_pipeline_wrapping(client, project, monkeypatch):
+    client.put("/api/settings", json={"llm_model": "openai/DeepSeek-V4-Flash", "llm_api_base": "https://example.com"})
+    exc = litellm.InternalServerError(message="OpenAIException - Empty or invalid response from LLM endpoint. Received: '<!doctype html>sk-private-body'", model="openai/DeepSeek-V4-Flash", llm_provider="openai")
+    monkeypatch.setattr(litellm, "completion", Mock(side_effect=exc))
+    run_id = new_run(client, project)
+    assert work_once()
+    error = detail(client, run_id)["error_details"]
+    assert error["category"] == "bad_endpoint"
+    assert error["provider"] == "openai" and error["model"] == "openai/DeepSeek-V4-Flash"
+    assert error["stage"] == "keyword_research"
+    assert "sk-private-body" not in client.get("/api/logs").text
+
+
 @pytest.mark.parametrize("message,category", [
     ("API key is missing", "auth"),
     ("api_key must be supplied to the Fireworks client", "auth"),

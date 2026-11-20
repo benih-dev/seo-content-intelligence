@@ -5,12 +5,22 @@ import ts from "typescript";
 
 const source = readFileSync(new URL("./settings.ts", import.meta.url), "utf8");
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } });
-const { settingsPatch, secretStatus } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
+const { settingsPatch, secretStatus, needsApiPath } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
 const initial = {
   llm_model: "", llm_api_base: "", serp_provider: "mock", dataforseo_login: "", github_api_url: "https://api.github.com",
   llm_api_key: { configured: true, source: "db" }, dataforseo_password: { configured: false, source: "none" },
   github_token: { configured: true, source: "env" }, modes: { llm: "mock", serp: "mock" },
 };
+
+test("root API URLs warn without rewriting while empty, invalid and API paths do not", () => {
+  for (const base of ["https://host", "https://host/", "http://localhost:8080?mode=test"]) assert.equal(needsApiPath(base), true);
+  for (const base of ["", "invalid", "https://host/v1", "https://host/custom/api", "ftp://host"]) assert.equal(needsApiPath(base), false);
+  const values = { ...initial, llm_api_base: "https://host" };
+  assert.equal(settingsPatch(initial, values, {}).llm_api_base, "https://host");
+  const page = readFileSync(new URL("../app/settings/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /needsApiPath\(values.llm_api_base\)/);
+  assert.ok(page.includes('role="status">Most OpenAI-compatible APIs need /v1 at the end'));
+});
 
 test("unchanged values and empty secret inputs produce no updates", () => {
   assert.deepEqual(settingsPatch(initial, initial, {}), {});

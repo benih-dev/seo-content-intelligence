@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { AppSettings, PublicSetting, SecretSetting, secretStatus, settingsPatch } from "@/lib/settings";
+import { AppSettings, PublicSetting, SecretSetting, secretStatus, settingsPatch, needsApiPath } from "@/lib/settings";
 import { ErrorNotice, Loading, Panel, SectionTitle } from "@/components/ui";
 import { ConnectionTest } from "@/components/connection-test";
 
@@ -85,6 +85,7 @@ export default function SettingsPage() {
             <div className="form-stack">
               {publicInput("llm_model", "Model", "Leave empty for mock mode. For OpenAI-compatible endpoints use openai/<model>.")}
               {publicInput("llm_api_base", "API base URL", "Optional HTTP(S) endpoint, e.g. http://host:8080/v1. Empty uses the provider default.")}
+              {needsApiPath(values.llm_api_base) && <div className="notice warning" role="status">Most OpenAI-compatible APIs need /v1 at the end</div>}
               {secretInput("llm_api_key", "LLM API key")}
               <ConnectionTest kind="llm" />
             </div>

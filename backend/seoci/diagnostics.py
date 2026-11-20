@@ -100,11 +100,20 @@ def classify(exc, provider="pipeline", model="", endpoint="", config=None):
     config = config if config is not None else resolve_settings().values
     raw = str(exc).lower()
     kind = type(exc).__name__.lower()
+    llm_provider = getattr(exc, "llm_provider", None)
+    is_llm = provider == "LLM" or bool(llm_provider) or type(exc).__module__.startswith("litellm.")
+    if is_llm:
+        if provider in {"pipeline", "LLM"} and isinstance(llm_provider, str) and llm_provider:
+            provider = llm_provider
+        model = model or getattr(exc, "model", "") or config.get("llm_model", "")
+        endpoint = endpoint or config.get("llm_api_base", "")
     status = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
     status = status if isinstance(status, int) else None
     category = None
     if isinstance(exc, (ValidationError, json.JSONDecodeError)):
         category = "invalid_output"
+    elif is_llm and any(marker in raw for marker in ("empty or invalid response from llm endpoint", "<!doctype html", "<html")):
+        category = "bad_endpoint"
     elif isinstance(exc, (httpx.TimeoutException, TimeoutError)) or "timeout" in kind:
         category = "timeout"
     elif isinstance(exc, (httpx.ConnectError, ConnectionError)) or any(x in kind for x in ("connection", "transport", "dns")):
@@ -136,7 +145,10 @@ def classify(exc, provider="pipeline", model="", endpoint="", config=None):
             category = "unreachable"
         elif "bad request" in raw:
             category = "bad_request"
-    if category == "auth":
+    if category == "bad_endpoint":
+        explanation = "LLM endpoint returned HTML/non-JSON instead of an API response."
+        hint = "LLM_API_BASE likely needs the API path, e.g. https://host/v1"
+    elif category == "auth":
         category, explanation, hint = "auth", "Authentication failed or credentials are missing.", "Check the API key or service-account access in Settings."
     elif category == "model_not_found":
         category, explanation, hint = "model_not_found", "The model or endpoint is not available.", "Check the model name and whether this endpoint supports it."
@@ -198,7 +210,7 @@ def observed(provider, *, llm=False, endpoint=""):
                 result = fn(*args, **kwargs)
             except Exception as exc:
                 error = classify(exc, provider, model, config["llm_api_base"] if llm else endpoint, config)
-                record_event(level="error", message=error["message"], provider=provider, model=model, status=error["status"],
+                record_event(level="error", message=error["message"], provider=error["provider"], model=error["model"], status=error["status"],
                              duration_ms=round((time.monotonic()-start)*1000), error=error)
                 raise ProviderFailure(error) from None
             record_event(message="Provider call succeeded", provider=provider, model=model, status=200,

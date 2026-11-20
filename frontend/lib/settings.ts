@@ -22,3 +22,11 @@ export function secretStatus(status: SecretStatus) {
   if (!status.configured) return "Not set";
   return status.source === "db" ? "Configured (saved in app)" : "Configured (from environment)";
 }
+
+export function needsApiPath(base: string) {
+  if (!base.trim()) return false;
+  try {
+    const url = new URL(base);
+    return ["http:", "https:"].includes(url.protocol) && url.pathname === "/";
+  } catch { return false; }
+}
