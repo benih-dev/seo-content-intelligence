@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from seoci.config import settings
@@ -43,11 +45,12 @@ def cached(provider, query, locale, device, fetch):
         if row and row.expires_at > time.time():
             return row.data
         data = fetch()
+        insert = sqlite_insert if db.bind.dialect.name == "sqlite" else postgres_insert
+        statement = insert(ResponseCache).values(key=key, data=data, expires_at=time.time() + settings.cache_ttl_seconds)
+        db.execute(statement.on_conflict_do_update(index_elements=[ResponseCache.key],
+                   set_={"data": statement.excluded.data, "expires_at": statement.excluded.expires_at}))
         if row:
-            row.data, row.expires_at = data, time.time() + settings.cache_ttl_seconds
-        else:
-            db.add(ResponseCache(key=key, data=data, expires_at=time.time() + settings.cache_ttl_seconds))
-        db.flush()
+            db.expire(row)
         return data
     if active_session.get() is not None:
         return resolve(active_session.get())
