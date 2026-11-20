@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ThemeSelect } from "@/components/theme-select";
 import {
   ArrowUpRight,
   Boxes,
@@ -96,10 +97,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
               {path.startsWith("/runs/") ? "Content workbench" : "Projects"}
             </strong>
           </span>
-          <span className="topbar-right">
-            <span className="live-dot" /> Evidence-led publishing{" "}
-            <Sparkles size={15} />
-          </span>
+          <div className="topbar-actions">
+            <span className="topbar-right">
+              <span className="live-dot" /> Evidence-led publishing{" "}
+              <Sparkles size={15} />
+            </span>
+            <ThemeSelect />
+          </div>
         </header>
         <main id="main">{children}</main>
         <footer className="main-footer">
