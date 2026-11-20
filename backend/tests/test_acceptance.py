@@ -129,7 +129,7 @@ def test_manual_versions_and_diff(client, project):
     endpoint = f"/api/runs/{run}/draft"
     assert client.put(endpoint, json={"body_md": old["body_md"]}).status_code == 409
     assert client.put(endpoint, json={"body_md": " \n "}).status_code == 422
-    body = "Berkebun di balkon: *catatan editor*\n===" + old["body_md"][old["body_md"].index("\n"):]
+    body = "Berkebun di balkon:\n*catatan editor*\n===" + old["body_md"][old["body_md"].index("\n"):]
     response = client.put(endpoint, json={"body_md": body + "\n\nCatatan editor: sesuaikan dengan kondisi Anda."})
     assert response.status_code == 202
     work_once()

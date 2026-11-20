@@ -13,8 +13,11 @@ def markdown_headings(body):
     tokens = MarkdownIt("commonmark", {"html": False}).parse(body)
     for i, token in enumerate(tokens):
         if token.type == "heading_open":
-            text = "".join(child.content for child in tokens[i + 1].children or []
-                           if child.type in {"text", "code_inline", "image"})
+            text = "".join(
+                " " if child.type in {"softbreak", "hardbreak"} else child.content
+                for child in tokens[i + 1].children or []
+                if child.type in {"text", "code_inline", "image", "softbreak", "hardbreak"}
+            )
             yield token.map[0] + 1, int(token.tag[1:]), text
 
 
