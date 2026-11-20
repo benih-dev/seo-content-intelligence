@@ -54,6 +54,7 @@ def check_article(body, metadata, evidence, inventory, keyword, expert=False):
             continue
         # Ignore table separators, headings, URL-only references and ordered list markers.
         text = re.sub(r"https?://[^\s)]+", "", re.sub(r"^\d+\.\s", "", line))
+        text = re.sub(r"^#{1,6}\s+(?:(?:step|langkah|tahap)\s+\d+\s*[:.)-]?|\d+[.)])\s*", "", text, flags=re.I)
         if re.search(r"\b\d+(?:[.,]\d+)?\s*(?:%|persen|percent|juta|million|days|hari|tahun|years)?", text):
             supported = any(url in line and str(ev.get("claim", "")) in line for ev in evidence for url in [ev["url"]])
             if not supported:
