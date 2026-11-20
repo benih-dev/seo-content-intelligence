@@ -163,3 +163,18 @@ def test_secure_cookie_and_cross_site_rejection(raw_client):
     response = raw_client.post("/api/auth/login", json={"username": "owner", "password": "test-password"},
                                headers={"x-forwarded-proto": "https"})
     assert "Secure" in response.headers["set-cookie"]
+
+
+def test_cors_preflight_without_session(raw_client):
+    response = raw_client.options("/api/settings", headers={
+        "Origin": "http://localhost:3000", "Access-Control-Request-Method": "PUT",
+        "Access-Control-Request-Headers": "Content-Type",
+    })
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert "PUT" in response.headers["access-control-allow-methods"]
+    denied = raw_client.options("/api/settings", headers={
+        "Origin": "https://untrusted.example", "Access-Control-Request-Method": "PUT",
+    })
+    assert denied.status_code == 400
+    assert raw_client.get("/api/settings", headers={"Origin": "http://localhost:3000"}).status_code == 401

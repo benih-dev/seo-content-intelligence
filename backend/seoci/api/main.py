@@ -37,7 +37,6 @@ async def lifespan(app):
 app = FastAPI(title="SEO Content Intelligence", version="0.1.0", lifespan=lifespan)
 app.include_router(settings_router)
 app.include_router(auth_router)
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"], allow_methods=["*"], allow_headers=["*"])
 
 
 @app.middleware("http")
@@ -55,6 +54,9 @@ async def authenticate(request: Request, call_next):
         return await call_next(request)
     except OSError:
         return JSONResponse(status_code=503, content={"detail": "Authentication storage unavailable; check server file permissions"})
+
+
+app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"], allow_methods=["*"], allow_headers=["*"])
 
 
 def database():
