@@ -5,7 +5,19 @@ import { api } from "@/lib/api";
 import type { Project, ProjectInput } from "@/lib/types";
 import { ErrorNotice, Panel, Submit } from "./ui";
 
-export function ProjectForm({ project }: { project?: Project }) {
+function existingStructuredRules(rules: ProjectInput["rules"]) {
+  return Object.fromEntries(
+    Object.entries(rules).filter(([key, value]) => key !== "instructions" || typeof value !== "string"),
+  );
+}
+
+export function ProjectForm({
+  project,
+  onSaved,
+}: {
+  project?: Project;
+  onSaved?: (project: Project) => void;
+}) {
   const router = useRouter();
   const [form, setForm] = useState<ProjectInput>(
     project || {
@@ -20,27 +32,57 @@ export function ProjectForm({ project }: { project?: Project }) {
       business_objective: "Educate readers",
     },
   );
-  const [rules, setRules] = useState(JSON.stringify(form.rules, null, 2));
+  const [rules, setRules] = useState(
+    typeof form.rules.instructions === "string" ? form.rules.instructions : "",
+  );
+  const [structuredRules, setStructuredRules] = useState(
+    () => JSON.stringify(existingStructuredRules(form.rules), null, 2),
+  );
+  const hasStructuredRules = Object.keys(existingStructuredRules(form.rules)).length > 0;
   const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
-  function field(key: keyof ProjectInput, value: string) {
+function field(key: Exclude<keyof ProjectInput, "rules">, value: string) {
     setForm({ ...form, [key]: value });
+    setSaved(false);
   }
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
+    setSaved(false);
     setBusy(true);
     try {
-      const parsed = JSON.parse(rules);
-      if (!parsed || Array.isArray(parsed) || typeof parsed !== "object")
-        throw new Error("Editorial rules must be a JSON object.");
+      if (![form.name, form.domain, form.niche, form.audience].every((text) => text.trim())) {
+        throw new Error("Enter a project name, website domain, niche, and audience.");
+      }
+      const domain = form.domain.trim();
+      const websiteUrl = domain.includes("://") ? domain : `https://${domain}`;
+      const website = URL.canParse(websiteUrl) ? new URL(websiteUrl) : null;
+      if (!website || !["https:", "http:"].includes(website.protocol) || website.username || website.password || /\s/.test(domain)) {
+        throw new Error("Enter a website domain such as example.com or https://example.com.");
+      }
+      let nextRules: ProjectInput["rules"] = {};
+      if (hasStructuredRules) {
+        try {
+          const parsed = JSON.parse(structuredRules);
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+          nextRules = parsed;
+        } catch {
+          throw new Error('Existing structured rules must be a JSON object. Use {} to remove them.');
+        }
+      }
+      if (rules.trim()) nextRules.instructions = rules.trim();
       const result = await api<Project>(
         project ? `/projects/${project.id}` : "/projects",
-        { ...form, rules: parsed },
+        { ...form, domain: website.origin, rules: nextRules },
         project ? "PUT" : "POST",
       );
-      if (project) window.location.reload();
-      else router.push(`/projects/${result.id}`);
+      if (project) {
+        setForm(result);
+        setRules(rules.trim());
+        setSaved(true);
+        onSaved?.(result);
+      } else router.push(`/projects/${result.id}`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -58,6 +100,7 @@ export function ProjectForm({ project }: { project?: Project }) {
             Project name
             <input
               required
+              maxLength={200}
               value={form.name}
               onChange={(e) => field("name", e.target.value)}
               placeholder="e.g. Kebun Balkon"
@@ -67,11 +110,11 @@ export function ProjectForm({ project }: { project?: Project }) {
             Website domain
             <input
               required
-              type="url"
               value={form.domain}
               onChange={(e) => field("domain", e.target.value)}
-              placeholder="https://example.com"
+              placeholder="example.com"
             />
+            <small>Enter your domain or full website URL.</small>
           </label>
           <label>
             Niche / topic focus
@@ -107,6 +150,7 @@ export function ProjectForm({ project }: { project?: Project }) {
               required
               minLength={2}
               maxLength={3}
+              pattern="[A-Za-z]{2,3}"
               value={form.country}
               onChange={(e) => field("country", e.target.value.toUpperCase())}
               placeholder="ID"
@@ -154,20 +198,40 @@ export function ProjectForm({ project }: { project?: Project }) {
           />
         </label>
         <label>
-          Editorial rules <span className="muted">(JSON object)</span>
+          Editorial rules
           <textarea
-            className="code-input"
             rows={4}
             value={rules}
-            onChange={(e) => setRules(e.target.value)}
-            spellCheck={false}
+            placeholder="Use plain language. Cite original sources. Avoid promotional claims."
+            onChange={(e) => {
+              setRules(e.target.value);
+              setSaved(false);
+            }}
           />
           <small>
             Author/reviewer rules, exclusions, preferred categories, and style
             requirements.
           </small>
         </label>
+        {hasStructuredRules && (
+          <details>
+            <summary>Existing structured rules</summary>
+            <label>
+              Structured rules (JSON)
+              <textarea
+                rows={4}
+                className="code-input"
+                value={structuredRules}
+                onChange={(e) => {
+                  setStructuredRules(e.target.value);
+                  setSaved(false);
+                }}
+              />
+            </label>
+          </details>
+        )}
         <ErrorNotice error={error} />
+        {saved && <div className="notice success" role="status">Profile saved.</div>}
         <div className="form-footer">
           <span>Every run keeps a snapshot of this profile.</span>
           <Submit busy={busy}>

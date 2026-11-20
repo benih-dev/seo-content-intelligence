@@ -11,11 +11,12 @@ from sqlalchemy import select
 
 from seoci.config import settings
 from seoci.db import Session
-from seoci.export import build_exports, render_md, row_dict
+from seoci.export import build_exports, render_md, row_dict, with_article_h1
 from seoci.models import (ApprovalEvent, ArticleDraft, AuditEvent, ContentBrief, EvidenceItem, KeywordMetricSnapshot,
                           Job, KeywordRecord, Project, QAReview, ResearchSource, SERPResult, SERPSnapshot,
                           SiteContentItem, StageArtifact, WorkflowRun, now)
-from seoci.pipeline.quality import available_slug, check_article, opportunity, overlap, ymyl
+from seoci.pipeline.quality import (annotate_internal_links, available_slug, check_article, opportunity, overlap,
+                                    suggest_internal_links, ymyl)
 from seoci.pipeline.state import transition
 from seoci.providers.keywords import get_keywords
 from seoci.providers.llm import Brief, Draft, Intent, QA, SEO, Strategy, get_llm
@@ -100,8 +101,9 @@ def stage(name, fn, version_fn=lambda db, run: 1):
 
 
 def load_context(db, run):
-    project = db.get(Project, run.project_id)
-    run.context = {"project": row_dict(project), "project_version": project.version}
+    if not run.context.get("project"):
+        project = db.get(Project, run.project_id)
+        run.context = {"project": row_dict(project), "project_version": project.version}
     transition(db, run, "researching", reason="Context loaded")
     return run.context
 
@@ -111,6 +113,7 @@ def keyword_research(db, run):
     candidates = provider.suggestions(run.primary_keyword, run.locale) if run.mode == "discovery" else [run.primary_keyword]
     metrics = provider.metrics(candidates, run.locale)
     shortlist = []
+    inventory = list(db.scalars(select(SiteContentItem).where(SiteContentItem.project_id == run.project_id)))
     for keyword in candidates:
         snapshot = get_serp().search(keyword, run.locale)
         if not snapshot.get("results"):
@@ -124,7 +127,9 @@ def keyword_research(db, run):
         metric = metrics[keyword]
         score = opportunity(metric, not snapshot.get("mock", False), keyword, run.context["project"], intent["label"])
         record = KeywordRecord(run_id=run.id, keyword=keyword, locale=run.locale, intent=intent["label"],
-                               score=score["score"], confidence=score["confidence"], data={"intent": intent, "metrics": metric, "opportunity": score, "serp_snapshot_id": snap.id})
+                               score=score["score"], confidence=score["confidence"], data={"intent": intent, "metrics": metric, "opportunity": score, "serp_snapshot_id": snap.id,
+                               "overlap_warnings": overlap(keyword, inventory), "inventory_count": len(inventory),
+                               "inventory_missing_metadata": sum(not x.title.strip() for x in inventory)})
         db.add(record)
         db.flush()
         db.add(KeywordMetricSnapshot(keyword_id=record.id, provider=metric["provider"], metric_type="search_volume",
@@ -147,6 +152,11 @@ def keyword_review(state):
             raise ValueError("Select a keyword from the shortlist")
         record.selected = True
         record.intent = payload.get("intent", record.intent)
+        snapshot = db.get(SERPSnapshot, record.data["serp_snapshot_id"])
+        score = opportunity(record.data["metrics"], not snapshot.data.get("mock", False),
+                            chosen, run.context["project"], record.intent)
+        record.data = {**record.data, "final_intent": record.intent, "opportunity": score}
+        record.score, record.confidence = score["score"], score["confidence"]
         run.primary_keyword = chosen
         transition(db, run, "strategy", actor="user", reason="Keyword and final intent approved", artifact_ref=record.id)
         db.commit()
@@ -161,8 +171,22 @@ def strategy(db, run):
     return data
 
 
+def internal_links(db, run, data):
+    inventory = list(db.scalars(select(SiteContentItem).where(SiteContentItem.project_id == run.project_id)))
+    links = annotate_internal_links(data.get("internal_links", []), inventory)
+    if not links and not data.get("internal_links"):
+        topic = " ".join([run.primary_keyword] + [x["heading"] for x in data["outline"]] + data.get("subtopics", []))
+        links = suggest_internal_links(inventory, topic)
+    return links
+
+
 def brief(db, run):
-    data = llm_call(db, run, "brief", Brief)
+    strategy_data = (artifact(db, run.id, "strategy") or StageArtifact(data={})).data
+    strategy_view = {k: strategy_data.get(k, "") for k in ("angle", "rationale", "differentiation")}
+    data = llm_call(db, run, "brief", Brief, {"strategy": strategy_view})
+    for key in ("rationale", "differentiation"):
+        data[key] = data.get(key) or strategy_view[key]
+    data["internal_links"] = internal_links(db, run, data)
     row = ContentBrief(run_id=run.id, data=data)
     db.add(row)
     db.flush()
@@ -180,11 +204,14 @@ def brief_review(state):
         edits = decision.get("payload", {}).get("edits")
         if edits:
             data = Brief.model_validate({**row.data, **edits}).model_dump()
-            row = ContentBrief(run_id=run.id, version=row.version + 1, data=data)
-            db.add(row)
+            data["internal_links"] = annotate_internal_links(data["internal_links"], db.scalars(
+                select(SiteContentItem).where(SiteContentItem.project_id == run.project_id)))
+            if data != row.data:
+                row = ContentBrief(run_id=run.id, version=row.version + 1, data=data)
+                db.add(row)
         row.status = "approved"
         db.flush()
-        transition(db, run, "evidence_research", actor="user", reason="Brief approved", artifact_ref=row.id)
+        transition(db, run, "evidence_research", actor="user", reason=f"Brief v{row.version} approved", artifact_ref=row.id)
         db.commit()
     return {}
 
@@ -214,14 +241,18 @@ def drafting(db, run):
         transition(db, run, "drafting", reason="Apply bounded revision")
     old = latest(db, ArticleDraft, run.id)
     version = old.version + 1 if old else 1
-    feedback = {"previous_draft": old.body_md if old else None}
+    feedback = {"previous_draft": old.body_md if old else None, "revision_instructions": ""}
     if old:
         review = latest(db, QAReview, run.id)
-        approval = db.scalar(select(ApprovalEvent).where(ApprovalEvent.run_id == run.id,
-                             ApprovalEvent.stage == "final", ApprovalEvent.decision == "request_revision")
-                             .order_by(ApprovalEvent.created_at.desc()).limit(1))
+        approval = db.scalar(select(ApprovalEvent).where(
+            ApprovalEvent.run_id == run.id, ApprovalEvent.stage == "final",
+            ApprovalEvent.decision == "request_revision", ApprovalEvent.created_at >= review.created_at,
+        ).order_by(ApprovalEvent.created_at.desc()).limit(1)) if review else None
         feedback.update(reviewer_comment=approval.comment if approval else None,
-                        qa_findings=review.data.get("findings", []) if review else [])
+                        qa_findings=review.data.get("findings", []) if review else [],
+                        revision_instructions=approval.comment if approval and approval.created_at >= old.created_at else "",
+                        revision_instruction="Revise the previous draft in place. Preserve existing edits and "
+                        "sections unless the reviewer comment or QA findings require changing them.")
     data = llm_call(db, run, "revise" if old else "draft", Draft, feedback)
     row = ArticleDraft(run_id=run.id, version=version, body_md=data["body_md"], body_html=render_md(data["body_md"]), data={"change_log": data["change_log"]})
     db.add(row)
@@ -234,7 +265,9 @@ def optimizing(db, run):
     row = latest(db, ArticleDraft, run.id)
     row.metadata_json = {**llm_call(db, run, "seo", SEO, {"body_md": row.body_md}), "primary_keyword": run.primary_keyword, "locale": run.locale}
     ctx = context(db, run)
-    row.metadata_json = {**row.metadata_json, "slug": available_slug(row.metadata_json["slug"], ctx["domain"], ctx["inventory"])}
+    row.metadata_json = with_article_h1(row.body_md, {
+        **row.metadata_json, "slug": available_slug(row.metadata_json["slug"], ctx["domain"], ctx["inventory"]),
+    })
     transition(db, run, "qa", reason="SEO metadata generated", artifact_ref=row.id)
     return row.metadata_json
 
@@ -242,7 +275,8 @@ def optimizing(db, run):
 def qa(db, run):
     row = latest(db, ArticleDraft, run.id)
     ctx = context(db, run)
-    evidence = [{**x, "url": x["data"].get("url")} for x in ctx["evidence"]]
+    publishers = {source["id"]: source["publisher"] for source in ctx["sources"]}
+    evidence = [{**x, "url": x["data"].get("url"), "publisher": publishers.get(x["source_id"])} for x in ctx["evidence"]]
     result = check_article(row.body_md, row.metadata_json, evidence, ctx["inventory"], run.primary_keyword, ymyl(run.primary_keyword), project_domain=ctx["domain"])
     review = llm_call(db, run, "qa", QA, {"body_md": row.body_md, "metadata": row.metadata_json})
     result["findings"] += review["findings"]
@@ -252,7 +286,9 @@ def qa(db, run):
     human_flags = {"Expert review required", "YMYL sources need human verification"}
     unresolved = [x for x in result["findings"] if x.get("severity") in {"blocker", "major"}
                   and x.get("finding") not in human_flags]
-    if unresolved and run.revision_count < settings.max_revision_cycles:
+    if unresolved and row.data.get("origin") == "manual":
+        transition(db, run, "blocked", reason="Manual draft needs fixes; see QA findings", artifact_ref=row.id)
+    elif unresolved and run.revision_count < settings.max_revision_cycles:
         run.revision_count += 1
         transition(db, run, "revision_required", reason="QA requires revision")
     elif unresolved:
@@ -278,6 +314,10 @@ def final_review(state):
             run.revision_count += 1
             transition(db, run, "revision_required", actor="user", reason=decision.get("comment", "User requested revision"))
         else:
+            draft = latest(db, ArticleDraft, run.id)
+            payload = decision.get("payload", {})
+            if payload.get("draft_id") != draft.id or payload.get("draft_version") != draft.version:
+                raise ValueError("Reviewed draft is not the latest draft")
             review = latest(db, QAReview, run.id)
             expert = decision.get("payload", {}).get("expert_reviewed", False)
             if review.data["expert_review_required"] and not expert:

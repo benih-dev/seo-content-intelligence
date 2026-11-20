@@ -27,6 +27,7 @@ export interface ContentItem {
   slug: string;
   status: string;
   last_seen_at: string;
+  metadata_json: { sitemap_lastmod?: string };
 }
 export interface Version {
   id: string;
@@ -52,6 +53,10 @@ export interface Keyword extends Version {
   confidence: number;
   data: {
     intent: Intent;
+    final_intent?: string;
+    overlap_warnings?: { url: string; reason: string; recommendation: string }[];
+    inventory_count?: number;
+    inventory_missing_metadata?: number;
     metrics: {
       volume: number | null;
       competition: string | number | null;
@@ -69,14 +74,26 @@ export interface Keyword extends Version {
     serp_snapshot_id: string;
   };
 }
+export interface BriefLink {
+  url: string;
+  title: string;
+  anchor: string;
+  reason: string;
+  status: "inventory" | "search_suggestion";
+}
 export interface BriefData {
   angle: string;
+  rationale: string;
+  differentiation: string;
   audience: string;
   intent: string;
   outline: { level: number; heading: string; purpose: string }[];
   questions: string[];
+  subtopics: string[];
+  entities: string[];
+  examples: string[];
   exclusions: string[];
-  internal_links: string[];
+  internal_links: BriefLink[];
   source_plan: string[];
 }
 export interface Brief extends Version {
@@ -161,6 +178,8 @@ export interface RunSummary {
 }
 export interface Run extends RunSummary {
   github_publish?: GitHubPublish | null;
+  revision_limit: number;
+  mock_revision: boolean;
   context: { project?: Project };
   artifacts: (Version & { stage: string; data: Record<string, unknown> })[];
   keywords: Keyword[];
@@ -170,6 +189,7 @@ export interface Run extends RunSummary {
   sources: Source[];
   evidence: Evidence[];
   audit: Audit[];
+  approvals: (Version & { stage: string; actor_id: string; decision: string; comment: string; data: Record<string, unknown> })[];
   jobs: Job[];
   exports: string[];
   serp_snapshots: (Version & {

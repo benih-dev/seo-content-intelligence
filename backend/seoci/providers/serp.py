@@ -19,7 +19,7 @@ class MockSerp:
         return {"query": query, "locale": locale, "device": device, "provider": "mock",
                 "captured_at": now(), "mock": True, "results": [
                     {"rank": 1, "url": "https://developers.google.com/search/docs/fundamentals/creating-helpful-content",
-                     "title": f"{query}: editorial research example", "snippet": "Prioritize helpful, reliable information for people. Mock topic relevance; verify before publishing."},
+                     "title": "Sample reference: Creating helpful content (not a competitor)", "snippet": "Offline SEO documentation example, not a search result for this keyword."},
                     {"rank": 2, "url": "https://developers.google.com/search/docs/fundamentals/seo-starter-guide",
                      "title": "SEO Starter Guide", "snippet": "Use descriptive titles and organize information clearly for readers."}]}
 

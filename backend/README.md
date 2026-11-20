@@ -69,7 +69,8 @@ Mutating workflow endpoints enqueue a job and return immediately; poll detail ev
 - `GET /api/projects` -> `Project[]`.
 - `POST /api/projects` (201), `PUT /api/projects/{id}` -> `Project`.
   Input: `{name,domain,niche,audience,language?:"id",country?:"ID",voice_profile?:string,
-  rules?:object,business_objective?:string}`. First four required; domain is full URL.
+  rules?:object,business_objective?:string}`. First four required; a bare domain defaults to HTTPS.
+  The web form stores plain-text editorial rules in `rules.instructions`.
   Project adds `{id,version,created_at}`. PUT is full replacement, increments profile version;
   runs retain their own project snapshot.
 - `GET /api/projects/{id}` -> `Project`; `DELETE /api/projects/{id}` -> 204.
@@ -78,9 +79,12 @@ Mutating workflow endpoints enqueue a job and return immediately; poll detail ev
 - `GET /api/projects/{id}/content-items` -> `ContentItem[]`.
 - `POST /api/projects/{id}/content-items` input `{items:[{url,title?,slug?,status?,metadata_json?}]}`
   -> `{items:ContentItem[],failures:[{url,error}]}`. Upsert by project/url, maximum 200 per request.
-  ContentItem adds `{id,project_id,last_seen_at}`; off-domain URLs are rejected per item.
+  ContentItem adds `{id,project_id,last_seen_at}`; malformed or off-site URLs are rejected per item.
+  Omitted fields are preserved when a known URL is reimported.
 - `POST /api/projects/{id}/sitemap` (202) input `{url}` -> same import result shape. Bounded synchronous
-  connector import (not article pipeline work), supports sitemap indexes. Import failures do not abort siblings.
+  connector import (not article pipeline work), supports sitemap indexes and same-site redirects,
+  including the bare domain and its `www` variant. Import failures do not abort siblings.
+  URL-level `lastmod` metadata is saved as `metadata_json.sitemap_lastmod`; pages are not fetched.
 
 ### Runs
 
@@ -90,7 +94,7 @@ Mutating workflow endpoints enqueue a job and return immediately; poll detail ev
   In discovery, `primary_keyword` is the seed. Same key + body returns existing run; different body -> 409.
 - `Run`: `{id,project_id,mode,primary_keyword,locale,state,context,error,resume_state,
   revision_count,created_at,updated_at,idempotency_key,request_fingerprint}`.
-- `GET /api/runs/{id}` -> Run plus:
+- `GET /api/runs/{id}` -> Run plus `revision_limit`, `mock_revision` and:
   - `artifacts:[{id,run_id,stage,version,data,created_at}]`: context, keyword research (`data.shortlist`),
     strategy (`data.overlap_warnings`, `ymyl`, `expert_review_label`), brief, evidence, drafting, SEO, QA and export.
   - `keywords:[{id,run_id,version,keyword,locale,intent,score,confidence,selected,data,created_at}]`.
@@ -125,12 +129,16 @@ Mutating workflow endpoints enqueue a job and return immediately; poll detail ev
   -> `{run_id,job_id,state,queued:true}`.
   Keyword payload `{keyword?:shortlist string,intent?:string}` records intent override.
   Brief payload `{edits?:Partial<Brief>}` creates a new approved version, retaining the original.
-  Final approve requires QA without unresolved hard content issues; YMYL additionally requires
-  `payload:{expert_reviewed:true}` and nonempty comment identifying the human review. This explicitly
+  Final approve requires `payload:{draft_id,draft_version}` identifying the reviewed latest draft;
+  missing or stale identifiers return 409. QA must have no unresolved hard content issues. YMYL additionally requires
+  `expert_reviewed:true` in that payload and nonempty comment identifying the human review. This explicitly
   routes expert/source flags to human accountability; original QA findings are retained with resolution.
-  Final `request_revision` creates another draft and returns to QA/final review. Keyword/brief edits use approve.
+  Final `request_revision` creates another draft and returns to QA/final review. It shares the configured
+  revision cap with automatic revisions. Mock mode keeps the current Markdown and asks the editor to apply
+  feedback manually. Keyword/brief edits use approve.
 - `PUT /api/runs/{id}/draft` (202): `{body_md,metadata_json?:SEO}` -> `{draft_id,version,job_id,state}`.
-  Only final_review/blocked; creates a version and queues QA. Approved/exported articles are immutable.
+  Only final_review/blocked; creates a version, syncs the SEO H1 and queues QA. A failed check leaves
+  the edited version available for correction instead of triggering an automatic rewrite. Approved/exported articles are immutable.
 - `POST /api/runs/{id}/retry` (202), no body -> `{run_id,job_id,state}`.
   Resumes failed checkpoint, including approval payload if its job failed. Blocked drafts use manual edit.
 - `POST /api/runs/{id}/cancel`, no body -> `{run_id,state:"cancelled"}`. Refuses active worker or terminal states.

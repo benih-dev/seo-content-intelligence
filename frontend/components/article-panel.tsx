@@ -148,7 +148,7 @@ export function ArticlePanel({
   const [version, setVersion] = useState(latest?.version || 1);
   const [mode, setMode] = useState("preview");
   const [body, setBody] = useState(latest?.body_md || "");
-  const [a, setA] = useState(run.drafts[0]?.version || 1);
+  const [a, setA] = useState(run.drafts.at(-2)?.version || 1);
   const [b, setB] = useState(latest?.version || 1);
   const [diff, setDiff] = useState("");
   const [error, setError] = useState("");
@@ -177,12 +177,15 @@ export function ArticlePanel({
       </Empty>
     );
   const selected = run.drafts.find((d) => d.version === version) || latest;
+  const isLatest = selected.id === latest.id;
+  const dirty = body !== latest.body_md;
+  const revisionLimitReached = run.revision_count >= run.revision_limit;
+  const decisionDisabled = busy || dirty || !isLatest;
   const review = run.qa_reviews.findLast((q) => q.draft_id === selected.id);
-  const editable =
-    ["final_review", "blocked"].includes(run.state) &&
-    version === latest.version;
+  const editable = ["final_review", "blocked"].includes(run.state) && isLatest;
   async function compare() {
     setError("");
+    setDiff("");
     setDiffBusy(true);
     try {
       const result = await api<{ diff: string }>(
@@ -209,6 +212,24 @@ export function ArticlePanel({
           <span className="gate-pill">FINAL REVIEW</span>
         </div>
       )}
+      {run.state === "blocked" && (
+        <div className="notice warning">
+          <ShieldCheck size={18} />
+          <div>
+            <strong>Fix the QA findings before approval.</strong>
+            <p>The latest draft stays unchanged until you save a correction.</p>
+          </div>
+          <button
+            className="button"
+            onClick={() => {
+              setVersion(latest.version);
+              setMode("edit");
+            }}
+          >
+            Edit latest draft
+          </button>
+        </div>
+      )}
       <div className="article-layout">
         <section className="article-panel">
           <div className="article-toolbar">
@@ -228,28 +249,24 @@ export function ArticlePanel({
                 </button>
               ))}
             </div>
-            <label className="version-select">
-              <span className="sr-only">Draft version</span>
-              <select
-                aria-label="Draft version"
-                value={version}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setVersion(v);
-                  setBody(
-                    run.drafts.find((d) => d.version === v)?.body_md || "",
-                  );
-                }}
-              >
-                {run.drafts.map((d) => (
-                  <option key={d.id} value={d.version}>
-                    Version {d.version}
-                    {d.version === latest.version ? " · Latest" : ""}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={13} />
-            </label>
+            {mode !== "diff" && (
+              <label className="version-select">
+                <span className="sr-only">Draft version</span>
+                <select
+                  aria-label="Draft version"
+                  value={version}
+                  onChange={(e) => setVersion(Number(e.target.value))}
+                >
+                  {run.drafts.map((d) => (
+                    <option key={d.id} value={d.version}>
+                      Version {d.version}
+                      {d.version === latest.version ? " · Latest" : ""}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={13} />
+              </label>
+            )}
           </div>
           {mode === "preview" && (
             <article className="markdown article-body">
@@ -265,8 +282,8 @@ export function ArticlePanel({
                 <textarea
                   className="markdown-editor"
                   rows={30}
-                  value={body}
-                  readOnly={!editable}
+                  value={isLatest ? body : selected.body_md}
+                  readOnly={!editable || busy}
                   onChange={(e) => setBody(e.target.value)}
                   spellCheck={false}
                 />
@@ -274,14 +291,23 @@ export function ArticlePanel({
               <div className="editor-footer">
                 <span>
                   {editable
-                    ? "Saving creates a new version and reruns QA."
-                    : "Read-only: select the latest draft at final review or blocked."}
+                    ? dirty
+                      ? "Unsaved changes. Save to create a new version and rerun QA."
+                      : "Saving creates a new version and reruns QA."
+                    : "Read-only: only the latest draft can be edited during editorial review."}
                 </span>
+                {editable && dirty && (
+                  <button
+                    className="button"
+                    disabled={busy}
+                    onClick={() => setBody(latest.body_md)}
+                  >
+                    Discard changes
+                  </button>
+                )}
                 <button
                   className="button primary"
-                  disabled={
-                    !editable || busy || body === latest.body_md || !body.trim()
-                  }
+                  disabled={!editable || busy || !dirty || !body.trim()}
                   onClick={() => command("draft", { body_md: body }, "PUT")}
                 >
                   <Check size={15} />
@@ -292,55 +318,71 @@ export function ArticlePanel({
           )}
           {mode === "diff" && (
             <div className="diff-wrap">
-              <h3>What changed?</h3>
+              <h2>What changed?</h2>
               <p className="muted">
                 Compare immutable article versions, line by line.
               </p>
-              <div className="diff-controls">
-                <label>
-                  From version
-                  <select
-                    value={a}
-                    onChange={(e) => setA(Number(e.target.value))}
+              {run.drafts.length < 2 ? (
+                <p className="muted">
+                  Save another version to compare changes.
+                </p>
+              ) : (
+                <div className="diff-controls">
+                  <label>
+                    From version
+                    <select
+                      value={a}
+                      disabled={diffBusy}
+                      onChange={(e) => {
+                        setA(Number(e.target.value));
+                        setDiff("");
+                        setError("");
+                      }}
+                    >
+                      {run.drafts.map((d) => (
+                        <option key={d.id} value={d.version}>
+                          Version {d.version}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <span>→</span>
+                  <label>
+                    To version
+                    <select
+                      value={b}
+                      disabled={diffBusy}
+                      onChange={(e) => {
+                        setB(Number(e.target.value));
+                        setDiff("");
+                        setError("");
+                      }}
+                    >
+                      {run.drafts.map((d) => (
+                        <option key={d.id} value={d.version}>
+                          Version {d.version}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="button"
+                    disabled={diffBusy || a === b}
+                    onClick={compare}
                   >
-                    {run.drafts.map((d) => (
-                      <option key={d.id} value={d.version}>
-                        Version {d.version}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <span>→</span>
-                <label>
-                  To version
-                  <select
-                    value={b}
-                    onChange={(e) => setB(Number(e.target.value))}
-                  >
-                    {run.drafts.map((d) => (
-                      <option key={d.id} value={d.version}>
-                        Version {d.version}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  className="button"
-                  disabled={diffBusy}
-                  onClick={compare}
-                >
-                  {diffBusy ? "Comparing…" : "Compare"}
-                </button>
-              </div>
+                    {diffBusy ? "Comparing…" : "Compare"}
+                  </button>
+                </div>
+              )}
               <ErrorNotice error={error} />
               {diff && (
                 <pre className="diff-output">
                   {diff.split("\n").map((line, i) => (
                     <span
                       className={
-                        line.startsWith("+")
+                        line.startsWith("+") && !line.startsWith("+++ ")
                           ? "diff-add"
-                          : line.startsWith("-")
+                          : line.startsWith("-") && !line.startsWith("--- ")
                             ? "diff-remove"
                             : ""
                       }
@@ -354,15 +396,17 @@ export function ArticlePanel({
               )}
             </div>
           )}
-          <div className="article-caption">
-            <FileCode2 size={14} />
-            Draft v{selected.version} · {date(selected.created_at)}
-            <span>
-              {selected.body_md.split(/\s+/).length.toLocaleString()} words
-            </span>
-          </div>
+          {mode !== "diff" && (
+            <div className="article-caption">
+              <FileCode2 size={14} />
+              Draft v{selected.version} · {date(selected.created_at)}
+              <span>
+                {selected.body_md.split(/\s+/).length.toLocaleString()} words
+              </span>
+            </div>
+          )}
         </section>
-        <aside className="article-aside">
+        <aside className="article-aside" aria-label="Article details and exports">
           <Panel title="Article details">
             <dl className="definition-list">
               <div>
@@ -390,7 +434,7 @@ export function ArticlePanel({
             </dl>
           </Panel>
           <Panel
-            title="Quality assurance"
+            title={`Quality assurance · v${selected.version}`}
             aside={review && <Badge value={review.data.status} />}
           >
             <Findings review={review} />
@@ -448,6 +492,16 @@ export function ArticlePanel({
           eyebrow="HUMAN APPROVAL REQUIRED"
         >
           <div className="form-stack">
+            {!isLatest && (
+              <p className="muted">
+                Select the latest draft before making a final decision.
+              </p>
+            )}
+            {dirty && (
+              <p className="muted">
+                Save or discard the unsaved Markdown changes before continuing.
+              </p>
+            )}
             {run.qa_reviews.at(-1)?.data.expert_review_required && (
               <div className="notice warning">
                 <ShieldCheck size={20} />
@@ -479,13 +533,30 @@ export function ArticlePanel({
                 placeholder="Record your editorial decision or describe the revision you need."
               />
             </label>
+            {selected.id !== latest.id && (
+              <div className="notice">
+                <span>You are reviewing an older draft. Switch to the latest version before approving.</span>
+                <button
+                  className="button"
+                  onClick={() => {
+                    setVersion(latest.version);
+                    setBody(latest.body_md);
+                    setMode("preview");
+                  }}
+                >
+                  Review latest version
+                </button>
+              </div>
+            )}
             <div className="approval-actions">
               <p className="muted">
                 Approval enables exports. Nothing is published automatically.
               </p>
               <button
                 className="button"
-                disabled={busy || !comment.trim()}
+                disabled={
+                  decisionDisabled || revisionLimitReached || !comment.trim()
+                }
                 onClick={() =>
                   command("approve", {
                     stage: "final",
@@ -500,14 +571,14 @@ export function ArticlePanel({
               <button
                 className="button primary"
                 disabled={
-                  busy ||
+                  decisionDisabled ||
                   (!!run.qa_reviews.at(-1)?.data.expert_review_required &&
                     (!expert || !comment.trim()))
                 }
                 onClick={() =>
                   command("approve", {
                     stage: "final",
-                    payload: { expert_reviewed: expert },
+                    payload: { expert_reviewed: expert, draft_id: selected.id, draft_version: selected.version },
                     comment,
                   })
                 }
@@ -516,6 +587,20 @@ export function ArticlePanel({
                 Approve final article
               </button>
             </div>
+            {revisionLimitReached ? (
+              <p className="muted">
+                The revision limit is reached. Make any remaining changes in
+                Markdown.
+              </p>
+            ) : (
+              run.mock_revision && (
+                <p className="muted">
+                  Demo revisions preserve existing Markdown and add a review
+                  checklist when instructions are supplied. Apply substantive
+                  changes manually.
+                </p>
+              )
+            )}
           </div>
         </Panel>
       )}

@@ -1,24 +1,25 @@
 import difflib
 import hashlib
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from seoci.api.schemas import (ApprovalInput, DraftInput, InventoryInput, ProjectInput, RunInput,
                                SitemapInput)
+from seoci.config import settings
 from seoci.db import Session, init_db
-from seoci.export import render_md, row_dict
+from seoci.export import render_md, row_dict, with_article_h1
 from seoci.models import (ApprovalEvent, ArticleDraft, ArtifactFile, AuditEvent, ContentBrief, EvidenceItem,
                           Job, KeywordRecord, Project, QAReview, ResearchSource, SERPSnapshot,
-                          SiteContentItem, StageArtifact, WorkflowRun)
+                          SiteContentItem, StageArtifact, WorkflowRun, now)
 from seoci.pipeline.graph import latest
 from seoci.pipeline.state import transition
-from seoci.providers.llm import Brief
-from seoci.providers.sitemap import import_sitemap
+from seoci.providers.llm import Brief, SUPPORTED_INTENTS, validation_message
+from seoci.providers.sitemap import import_sitemap, project_url
 from seoci.publish_github import publish
 
 
@@ -119,23 +120,35 @@ def content_items(project_id: str, db=Depends(database)):
 @app.post("/api/projects/{project_id}/content-items")
 def add_items(project_id: str, body: InventoryInput, db=Depends(database)):
     p = get_or_404(db, Project, project_id)
-    items, failures = [], []
+    items, failures = {}, []
     for item in body.items:
-        parsed = urlparse(item.url)
-        if parsed.scheme not in {"http", "https"} or parsed.hostname != urlparse(p.domain).hostname:
-            failures.append({"url": item.url, "error": "URL must belong to project domain"})
+        url = item.url.strip()
+        try:
+            parsed = project_url(url, p.domain)
+        except ValueError as exc:
+            failures.append({"url": url, "error": str(exc)})
             continue
-        row = db.scalar(select(SiteContentItem).where(SiteContentItem.project_id == project_id, SiteContentItem.url == item.url))
+        row = db.scalar(select(SiteContentItem).where(SiteContentItem.project_id == project_id, SiteContentItem.url == url))
         if not row:
-            row = SiteContentItem(project_id=project_id, **{**item.model_dump(), "slug": item.slug or parsed.path.strip("/")})
+            row = SiteContentItem(project_id=project_id, **{
+                **item.model_dump(), "url": url, "slug": item.slug or parsed.path.strip("/"),
+            })
             db.add(row)
         else:
-            for key, value in item.model_dump().items():
+            changes = item.model_dump(exclude_unset=True, exclude={"url", "metadata_json"})
+            for key, value in changes.items():
+                if key in {"title", "slug"} and not value.strip():
+                    if key == "slug" and not row.slug:
+                        row.slug = parsed.path.strip("/")
+                    continue
                 setattr(row, key, value)
+            if item.metadata_json:
+                row.metadata_json = {**row.metadata_json, **item.metadata_json}
+            row.last_seen_at = now()
         db.flush()
-        items.append(row_dict(row))
+        items[url] = row_dict(row)
     db.commit()
-    return {"items": items, "failures": failures}
+    return {"items": list(items.values()), "failures": failures}
 
 
 @app.post("/api/projects/{project_id}/sitemap", status_code=202)
@@ -171,6 +184,7 @@ def create_run(body: RunInput, idempotency_key: str | None = Header(default=None
     if "-" not in locale or len(locale.split("-")) != 2:
         raise HTTPException(422, "locale must be language-COUNTRY")
     row = WorkflowRun(project_id=body.project_id, mode=body.mode, primary_keyword=body.primary_keyword,
+                      context={"project": row_dict(project), "project_version": project.version},
                       locale=locale, idempotency_key=idempotency_key, request_fingerprint=fingerprint)
     db.add(row)
     try:
@@ -193,7 +207,9 @@ def run_detail(run_id: str, db=Depends(database)):
         return [row_dict(x) for x in db.scalars(select(cls).where(cls.run_id == run.id).order_by(cls.created_at))]
     audit = rows(AuditEvent)
     usage = [x["data"] for x in audit if x["action"] == "llm_usage"]
-    return {**row_dict(run), "github_publish": run.context.get("github_publish"), "artifacts": rows(StageArtifact), "keywords": rows(KeywordRecord),
+    return {**row_dict(run), "revision_limit": settings.max_revision_cycles, "mock_revision": not settings.llm_model,
+            "github_publish": run.context.get("github_publish"),
+            "artifacts": rows(StageArtifact), "keywords": rows(KeywordRecord),
             "serp_snapshots": rows(SERPSnapshot), "briefs": rows(ContentBrief), "sources": rows(ResearchSource),
             "evidence": rows(EvidenceItem), "drafts": rows(ArticleDraft), "qa_reviews": rows(QAReview),
             "approvals": rows(ApprovalEvent), "audit": audit, "jobs": [row_dict(x) for x in db.scalars(select(Job).where(Job.run_id == run.id))],
@@ -234,16 +250,25 @@ def approve(run_id: str, body: ApprovalInput, db=Depends(database)):
         raise HTTPException(409, "Approval does not match the current review gate")
     if body.decision == "request_revision" and body.stage != "final":
         raise HTTPException(422, "Edit keyword/brief in payload and approve; request_revision is for final review")
+    if body.decision == "request_revision" and run.revision_count >= settings.max_revision_cycles:
+        raise HTTPException(409, "AI revision limit reached; edit the latest draft in Markdown")
     if body.stage == "keyword":
+        if "intent" in body.payload:
+            intent = body.payload["intent"]
+            if not isinstance(intent, str) or intent not in SUPPORTED_INTENTS:
+                raise HTTPException(422, "Select a supported search intent")
         keyword = body.payload.get("keyword", run.primary_keyword)
         if not db.scalar(select(KeywordRecord.id).where(KeywordRecord.run_id == run_id, KeywordRecord.keyword == keyword)):
             raise HTTPException(422, "Select an existing shortlist keyword")
     if body.stage == "brief":
         try:
             Brief.model_validate({**latest(db, ContentBrief, run_id).data, **body.payload.get("edits", {})})
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+        except ValidationError as exc:
+            raise HTTPException(422, validation_message(exc)) from exc
     if body.stage == "final" and body.decision == "approve":
+        draft = latest(db, ArticleDraft, run_id)
+        if body.payload.get("draft_id") != draft.id or body.payload.get("draft_version") != draft.version:
+            raise HTTPException(409, "The reviewed draft is not the latest draft. Switch to the latest version and review it before approving.")
         qa = latest(db, QAReview, run_id)
         if qa.data.get("expert_review_required") and not (body.payload.get("expert_reviewed") is True and body.comment.strip()):
             raise HTTPException(409, "Expert review required: expert_reviewed=true and reviewer comment required")
@@ -263,13 +288,18 @@ def edit_draft(run_id: str, body: DraftInput, db=Depends(database)):
     old = latest(db, ArticleDraft, run_id)
     if not old:
         raise HTTPException(409, "No draft exists")
+    if not body.body_md.strip():
+        raise HTTPException(422, "Article Markdown cannot be blank")
+    metadata = with_article_h1(body.body_md, {**old.metadata_json, **(body.metadata_json or {})})
+    if body.body_md == old.body_md and metadata == {**old.metadata_json, "h1": metadata["h1"]}:
+        raise HTTPException(409, "No draft changes to save")
     if run.state == "blocked":
         run.resume_state = "revision_required"
         transition(db, run, "resumed", actor="user", reason="Manual takeover")
     transition(db, run, "revision_required", actor="user", reason="Manual draft edit")
     draft = ArticleDraft(run_id=run_id, version=old.version + 1, body_md=body.body_md,
-                         body_html=render_md(body.body_md), metadata_json=body.metadata_json or old.metadata_json,
-                         data={"change_log": "Manual edit"})
+                         body_html=render_md(body.body_md), metadata_json=metadata,
+                         data={"change_log": "Manual edit", "origin": "manual"})
     db.add(draft)
     db.flush()
     transition(db, run, "qa", actor="user", reason="Recheck manually edited draft", artifact_ref=draft.id)

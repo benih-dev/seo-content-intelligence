@@ -1,8 +1,8 @@
 import json
 import re
-from typing import Protocol, TypeVar
+from typing import Literal, Protocol, TypeVar
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
@@ -12,10 +12,19 @@ from seoci.providers.demo_topics import practical_notes
 T = TypeVar("T", bound=BaseModel)
 
 
+SUPPORTED_INTENTS = {"informational", "commercial", "transactional", "navigational", "mixed"}
+
+
 class Intent(BaseModel):
     label: str
     reason: str
     confidence: float = Field(ge=0, le=1)
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value):
+        label = value.strip().lower() if isinstance(value, str) else ""
+        return label if label in SUPPORTED_INTENTS else "mixed"
 
 
 class Strategy(BaseModel):
@@ -24,29 +33,93 @@ class Strategy(BaseModel):
     differentiation: str
 
 
+INTENTS = ("informational", "commercial", "transactional", "navigational", "mixed")
+
+
+class InternalLink(BaseModel):
+    url: str = ""
+    title: str = ""
+    anchor: str = ""
+    reason: str = ""
+    status: Literal["inventory", "search_suggestion"] = "search_suggestion"
+
+
 class Brief(BaseModel):
-    angle: str
-    audience: str
+    angle: str = Field(min_length=1)
+    rationale: str = ""
+    differentiation: str = ""
+    audience: str = Field(min_length=1)
     intent: str
     outline: list[dict] = Field(min_length=2)
     questions: list[str]
+    subtopics: list[str] = []
+    entities: list[str] = []
+    examples: list[str] = []
     exclusions: list[str]
-    internal_links: list[str]
+    internal_links: list[InternalLink]
     source_plan: list[str]
+
+    @field_validator("angle", "rationale", "differentiation", "audience", mode="before")
+    @classmethod
+    def strip_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("questions", "subtopics", "entities", "examples", "exclusions", "source_plan", mode="before")
+    @classmethod
+    def clean_items(cls, value):
+        if not isinstance(value, list):
+            return value
+        items = [x.strip() for x in value if isinstance(x, str) and x.strip()]
+        return list(dict.fromkeys(items))
+
+    @field_validator("internal_links", mode="before")
+    @classmethod
+    def clean_links(cls, value):
+        if not isinstance(value, list):
+            return value
+        links = [{"url": x} if isinstance(x, str) else x for x in value]
+        return [{k: v.strip() if isinstance(v, str) else v for k, v in x.items()} for x in links
+                if isinstance(x, dict) and any(str(x.get(k) or "").strip() for k in ("url", "anchor", "title"))]
+
+    @field_validator("intent", mode="before")
+    @classmethod
+    def known_intent(cls, value):
+        value = value.strip().lower() if isinstance(value, str) else value
+        if value not in INTENTS:
+            raise ValueError("Search intent must be one of: " + ", ".join(INTENTS))
+        return value
 
     @model_validator(mode="after")
     def validate_outline(self):
         previous = 0
         for item in self.outline:
+            for key in ("heading", "purpose"):
+                value = item.get(key, "")
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    value = str(value)
+                if not isinstance(value, str):
+                    raise ValueError(f"Outline {key}s must be text")
+                item[key] = value.strip()
             level = item.get("level")
-            if not isinstance(level, int) or level not in {1, 2, 3} or not item.get("heading", "").strip():
-                raise ValueError("Outline requires level 1/2/3 and a nonempty heading")
-            if (previous == 0 and level != 1) or level > previous + 1:
-                raise ValueError("Outline must start with H1 and not skip heading levels")
+            if not isinstance(level, int) or level not in {1, 2, 3} or not item.get("heading"):
+                raise ValueError("Every outline section needs a heading and a level of H1, H2 or H3")
+            if previous == 0 and level != 1:
+                raise ValueError("The outline must start with the H1")
+            if level > previous + 1:
+                raise ValueError(f"“{item['heading']}” skips a heading level; use H{previous + 1} or lower")
+            if not item.get("purpose"):
+                raise ValueError(f"Add a section purpose for “{item['heading']}”")
             previous = level
         if sum(x["level"] == 1 for x in self.outline) != 1:
-            raise ValueError("Outline requires exactly one H1")
+            raise ValueError("The outline needs exactly one H1")
         return self
+
+
+def validation_message(exc: ValidationError) -> str:
+    def where(error):
+        loc = [str(x) for x in error["loc"] if not isinstance(x, int)]
+        return loc[0].replace("_", " ").capitalize() + ": " if loc else ""
+    return "; ".join(where(e) + e["msg"].removeprefix("Value error, ") for e in exc.errors())
 
 
 class Draft(BaseModel):
@@ -94,17 +167,41 @@ class MockLLMClient:
             data = {"angle": title, "rationale": f"Practical decisions for {ctx['audience']}; no invented statistics.",
                     "differentiation": "Decision table, worked example, checklist, and explicit research limitations."}
         elif task == "brief":
-            headings = ([k.capitalize(), "Tentukan tujuan dan kondisi awal", "Bandingkan pilihan sebelum memulai",
-                         "Langkah penerapan yang bisa disesuaikan", "Contoh dan evaluasi hasil", "Pertanyaan umum", "Kesimpulan"] if indo else
-                        [k.capitalize(), "Define your goal and starting point", "Compare your options", "A practical implementation plan",
-                         "Worked example and evaluation", "Frequently asked questions", "Conclusion"])
-            data = {"angle": title, "audience": ctx["audience"], "intent": ctx.get("intent", "informational"),
-                    "outline": [{"level": 1 if i == 0 else 2, "heading": h, "purpose": "Answer reader questions with actionable guidance"} for i, h in enumerate(headings)],
+            headings = ([(k.capitalize(), "Menjanjikan hasil akhir artikel dan untuk siapa panduan ini"),
+                         ("Tentukan tujuan dan kondisi awal", "Membantu pembaca memetakan kebutuhan, ruang, dan batasan sebelum mulai"),
+                         ("Bandingkan pilihan sebelum memulai", "Membandingkan pendekatan utama beserta kelebihan dan risikonya"),
+                         ("Langkah penerapan yang bisa disesuaikan", "Memberi langkah praktis yang bisa dicoba dan dibatalkan"),
+                         ("Contoh dan evaluasi hasil", "Menunjukkan contoh hipotetis dan cara menilai hasilnya"),
+                         ("Pertanyaan umum", "Menjawab keraguan yang sering muncul dari hasil pencarian"),
+                         ("Kesimpulan", "Merangkum keputusan dan langkah berikutnya")] if indo else
+                        [(k.capitalize(), "Promise the outcome and who this guide is for"),
+                         ("Define your goal and starting point", "Help readers map their needs, space and constraints first"),
+                         ("Compare your options", "Contrast the main approaches with their benefits and risks"),
+                         ("A practical implementation plan", "Give reversible, actionable steps to try"),
+                         ("Worked example and evaluation", "Show a hypothetical example and how to judge results"),
+                         ("Frequently asked questions", "Answer common doubts seen in search results"),
+                         ("Conclusion", "Summarise the decision and next step")])
+            strategy = ctx.get("strategy", {})
+            data = {"angle": strategy.get("angle", title), "rationale": strategy.get("rationale", ""),
+                    "differentiation": strategy.get("differentiation", ""), "audience": ctx["audience"], "intent": ctx.get("intent", "informational"),
+                    "outline": [{"level": 1 if i == 0 else 2, "heading": h, "purpose": p} for i, (h, p) in enumerate(headings)],
                     "questions": [f"Bagaimana memulai {k}?", "Apa kesalahan yang perlu dihindari?"] if indo else [f"How do I start with {k}?", "What mistakes should I avoid?"],
+                    "subtopics": ["Kebutuhan dan batasan awal", "Perbandingan pendekatan", "Evaluasi hasil"] if indo else ["Starting needs and constraints", "Comparing approaches", "Evaluating results"],
+                    "entities": [k],
+                    "examples": ["Contoh hipotetis pembaca pemula yang mencoba langkah kecil"] if indo else ["Hypothetical beginner running a small, reversible trial"],
                     "exclusions": ["Unverified statistics", "Personal professional advice", "Invented credentials"],
-                    "internal_links": ctx.get("inventory", []), "source_plan": [k, f"{k} authoritative guidance"]}
-        elif task in {"draft", "revise"}:
-            data = {"body_md": self.article(ctx, indo), "change_log": "Rebuilt from approved brief; removed unsupported quantitative claims" if task == "revise" else "Initial evidence-led draft"}
+                    "internal_links": [], "source_plan": [k, f"{k} authoritative guidance"]}
+        elif task == "draft":
+            data = {"body_md": self.article(ctx, indo), "change_log": "Initial evidence-led draft"}
+        elif task == "revise":
+            data = {"body_md": ctx.get("previous_draft") or self.article(ctx, indo),
+                    "change_log": "Demo revision: Markdown unchanged. Apply feedback manually."}
+            if task == "revise" and ctx.get("revision_instructions", "").strip():
+                heading = "Tanggapan atas arahan editor" if indo else "Response to editorial instructions"
+                data["body_md"] += f"\n\n## {heading}"
+                data["body_md"] += ("\n\nDalam demo ini, jadikan arahan tersebut sebagai daftar periksa: bandingkan pilihan dengan kebutuhan pembaca, periksa kesesuaian sumber, lalu tinjau kembali penjelasan sebelum publikasi. Editor tetap perlu memvalidasi perubahan secara langsung.\n" if indo else
+                                    "\n\nIn this demo, use these instructions as a review checklist: compare the options against reader needs, check source suitability, and review the explanation before publication. An editor must still validate the changes directly.\n")
+                data["change_log"] = "Preserved previous Markdown; added a demo review checklist. Apply feedback manually."
         elif task == "seo":
             desc = (f"Pelajari {k} melalui langkah praktis, perbandingan pilihan, contoh penerapan, dan daftar periksa agar keputusan Anda lebih terarah." if indo else
                     f"Explore {k} with a practical plan, comparison table, worked example and review checklist. Understand the trade-offs before you begin.")
@@ -193,8 +290,10 @@ class MockLLMClient:
         body = "# " + headings[0]["heading"] + "\n\n" + lead + "\n\n" + limit
         for i, heading in enumerate(headings[1:]):
             body += "\n\n" + "#" * heading.get("level", 2) + " " + heading["heading"] + "\n\n" + sections[min(i, len(sections)-1)]
-        if c.get("inventory"):
-            body += "\n\n" + ("Bacaan terkait" if indo else "Related reading") + ": " + f"[{'Panduan terkait' if indo else 'Related guide'}]({c['inventory'][0]})"
+        links = [x for x in brief.get("internal_links", []) if isinstance(x, dict) and x.get("status") == "inventory" and x.get("url")]
+        if links:
+            body += "\n\n" + ("Bacaan terkait" if indo else "Related reading") + ": " + ", ".join(
+                f"[{x.get('anchor') or x.get('title') or ('Panduan terkait' if indo else 'Related guide')}]({x['url']})" for x in links)
         body += "\n\n## " + ("Referensi" if indo else "References") + "\n\n"
         for source in c.get("sources", []):
             body += f"- [{source['title']}]({source['url']}) — {source['publisher']}; " + ("diakses " if indo else "retrieved ") + source["retrieved_at"][:10] + "\n"

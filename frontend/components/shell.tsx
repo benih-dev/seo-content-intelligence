@@ -19,7 +19,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className="sidebar" aria-label="Workspace navigation">
         <Link href="/" className="brand">
           <span className="brand-icon">
             <Layers3 size={20} />

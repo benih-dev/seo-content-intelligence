@@ -40,6 +40,9 @@ def detail(client, run):
 
 
 def approve(client, run, stage, **kwargs):
+    if stage == "final" and kwargs.get("decision", "approve") == "approve":
+        draft = detail(client, run)["drafts"][-1]
+        kwargs["payload"] = {"draft_id": draft["id"], "draft_version": draft["version"], **kwargs.get("payload", {})}
     response = client.post(f"/api/runs/{run}/approve", json={"stage": stage, **kwargs})
     assert response.status_code == 202, response.text
     from seoci.worker import work_once

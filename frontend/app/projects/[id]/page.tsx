@@ -14,6 +14,12 @@ import {
   SectionTitle,
 } from "@/components/ui";
 import { ProjectForm } from "@/components/project-form";
+import { TabList } from "@/components/tab-list";
+
+type ImportResult = {
+  items: ContentItem[];
+  failures: { url: string; error: string }[];
+};
 
 export default function ProjectPage({
   params,
@@ -28,7 +34,8 @@ export default function ProjectPage({
   const [tab, setTab] = useState("overview");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState("");
+  const [importError, setImportError] = useState("");
+  const [result, setResult] = useState<ImportResult>();
   useEffect(() => {
     Promise.all([
       api<Project>(`/projects/${id}`),
@@ -47,34 +54,37 @@ export default function ProjectPage({
     sitemap: boolean,
   ) {
     event.preventDefault();
-    setError("");
+    setImportError("");
     setBusy(true);
-    setResult("");
-    const form = new FormData(event.currentTarget);
+    setResult(undefined);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     try {
-      const response = await api<{
-        items: ContentItem[];
-        failures: { url: string; error: string }[];
-      }>(
+      const urls = String(form.get("urls") ?? "")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const [url, ...parts] = line.split("|");
+          const title = parts.join("|").trim();
+          return { url: url.trim(), ...(title ? { title } : {}) };
+        });
+      if (!sitemap && (urls.length === 0 || urls.length > 200)) {
+        throw new Error("Enter 1–200 URLs, one per line.");
+      }
+      const response = await api<ImportResult>(
         `/projects/${id}/${sitemap ? "sitemap" : "content-items"}`,
-        sitemap
-          ? { url: form.get("url") }
-          : {
-              items: String(form.get("urls"))
-                .split("\n")
-                .filter(Boolean)
-                .map((line) => {
-                  const [url, title] = line.split("|");
-                  return { url: url.trim(), title: title?.trim() || "" };
-                }),
-            },
+        sitemap ? { url: form.get("url") } : { items: urls },
       );
-      setItems(await api<ContentItem[]>(`/projects/${id}/content-items`));
-      setResult(
-        `Imported ${response.items.length} URLs.${response.failures.length ? " Skipped: " + response.failures.map((x) => `${x.url}: ${x.error}`).join("; ") : " No errors."}`,
-      );
+      setItems((current) => {
+        const byId = new Map(current.map((item) => [item.id, item]));
+        for (const item of response.items) byId.set(item.id, item);
+        return [...byId.values()];
+      });
+      setResult(response);
+      if (!sitemap && response.items.length > 0 && !response.failures.length) formElement.reset();
     } catch (e) {
-      setError((e as Error).message);
+      setImportError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -114,21 +124,22 @@ export default function ProjectPage({
               New content run
             </Link>
           </SectionTitle>
-          <div className="tabs" role="tablist" aria-label="Project sections">
-            {["overview", "profile", "inventory"].map((t) => (
-              <button
-                key={t}
-                role="tab"
-                aria-selected={tab === t}
-                onClick={() => setTab(t)}
-              >
+          <TabList
+            id="project"
+            label="Project sections"
+            selected={tab}
+            onSelect={setTab}
+            tabs={["overview", "profile", "inventory"].map((t) => ({ id: t, content: <>
                 {t[0].toUpperCase() + t.slice(1)}
                 {t === "inventory" && (
                   <span className="count">{items.length}</span>
                 )}
-              </button>
-            ))}
-          </div>
+              </> }))}
+          />
+          {["overview", "profile", "inventory"].filter((t) => t !== tab).map((t) => (
+            <div key={t} id={`project-panel-${t}`} role="tabpanel" aria-labelledby={`project-tab-${t}`} hidden />
+          ))}
+          <div id={`project-panel-${tab}`} role="tabpanel" aria-labelledby={`project-tab-${tab}`} tabIndex={0}>
           {tab === "overview" && (
             <>
               <div className="context-card">
@@ -203,7 +214,7 @@ export default function ProjectPage({
           )}
           {tab === "profile" && (
             <>
-              <ProjectForm project={project} />
+              <ProjectForm key={project.id} project={project} onSaved={setProject} />
               <div className="danger-zone">
                 <div>
                   <strong>Delete project</strong>
@@ -266,7 +277,7 @@ export default function ProjectPage({
                         rows={3}
                         placeholder={`${project.domain}/guide | Optional page title`}
                       />
-                      <small>Optional format: URL | page title</small>
+                      <small>Use full HTTP(S) URLs from your website. Optional format: URL | page title.</small>
                     </label>
                     <button disabled={busy} className="button">
                       <Plus size={15} />
@@ -275,12 +286,26 @@ export default function ProjectPage({
                   </form>
                 </Panel>
               </div>
+              <ErrorNotice error={importError} />
               {result && (
-                <div className="notice" role="status">
-                  {result}
+                <div className={`notice ${result.items.length && !result.failures.length ? "success" : "warning"}`} role="status">
+                  <div>
+                    <strong>
+                      {result.items.length === 0
+                        ? "No URLs added."
+                        : `${result.items.length} ${result.items.length === 1 ? "URL" : "URLs"} saved.`}
+                      {result.failures.length > 0 && ` ${result.failures.length} skipped.`}
+                    </strong>
+                    {result.failures.map(({ url, error }, index) => (
+                      <p key={`${url}-${index}`}>{url ? `${url}: ` : ""}{error}</p>
+                    ))}
+                    {!result.items.length && !result.failures.length && (
+                      <p>Check that your sitemap contains page URLs from this website.</p>
+                    )}
+                  </div>
                 </div>
               )}
-              <Panel title={`Known content · ${items.length} URLs`}>
+              <Panel title={`Known content · ${items.length} ${items.length === 1 ? "URL" : "URLs"}`}>
                 {!items.length ? (
                   <Empty title="No content imported yet">
                     Add your existing pages to detect overlap and suggest
@@ -303,7 +328,10 @@ export default function ProjectPage({
                               <a href={i.url} target="_blank" rel="noreferrer">
                                 {i.title || i.url}
                               </a>
-                              <small>{i.url}</small>
+                              {i.title && <small>{i.url}</small>}
+                              {i.metadata_json?.sitemap_lastmod && (
+                                <small>Sitemap last modified: {i.metadata_json.sitemap_lastmod}</small>
+                              )}
                             </td>
                             <td>
                               <Badge value={i.status} />
@@ -318,6 +346,7 @@ export default function ProjectPage({
               </Panel>
             </>
           )}
+          </div>
         </>
       )}
     </div>
