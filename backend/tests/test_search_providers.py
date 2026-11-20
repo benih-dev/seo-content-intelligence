@@ -197,27 +197,39 @@ def test_provider_validation_redacts_inputs(client, patch):
     assert "dummy-private" not in response.text
 
 
-@pytest.mark.parametrize("value,normalized", [
-    ("sc-domain:bücher.de", "sc-domain:xn--bcher-kva.de"),
-    ("sc-domain:example.xn--p1ai", "sc-domain:example.xn--p1ai"),
-    ("sc-domain:пример.рф", "sc-domain:xn--e1afmkfd.xn--p1ai"),
-    ("https://bücher.de/Blog/", "https://xn--bcher-kva.de/Blog/"),
-    ("https://example.xn--p1ai/", "https://example.xn--p1ai/"),
-    ("https://пример.рф:8443/Blog/", "https://xn--e1afmkfd.xn--p1ai:8443/Blog/"),
+@pytest.mark.parametrize("value", [
+    "sc-domain:bücher.de", "sc-domain:example.xn--p1ai", "sc-domain:пример.рф",
+    "sc-domain:straße.de", "sc-domain:مثال1.com", "  sc-domain:straße.de  ",
+    "https://bücher.de/Blog/", "https://example.xn--p1ai/", "https://пример.рф:8443/Blog/",
+    "https://straße.de/", "https://مثال1.com/", "  HTTPS://BÜCHER.de/Blog/  ",
 ])
-def test_idn_property_normalization(client, value, normalized):
+def test_idn_property_preserves_exact_identifier(client, value):
     response = client.put("/api/settings", json={"gsc_site_url": value})
     assert response.status_code == 200
-    assert response.json()["gsc_site_url"] == normalized
-    assert client.get("/api/settings").json()["gsc_site_url"] == normalized
+    assert response.json()["gsc_site_url"] == value.strip()
+    assert client.get("/api/settings").json()["gsc_site_url"] == value.strip()
 
 
-@pytest.mark.parametrize("host", ["-bücher.de", "bücher..de", "bücher.123", "bad_name.de", "bücher.xn--", "a" * 64 + ".de"])
-@pytest.mark.parametrize("prefix,suffix", [("sc-domain:", ""), ("https://", "/")])
-def test_invalid_idn_property_hosts(client, host, prefix, suffix):
-    response = client.put("/api/settings", json={"gsc_site_url": prefix + host + suffix})
+@pytest.mark.parametrize("host", ["", "bücher..de", ".bücher.de", "bücher.de.", "bü cher.de", "bücher.de/path", "bücher.de:443", "user@bücher.de"])
+def test_invalid_domain_property_structure(client, host):
+    response = client.put("/api/settings", json={"gsc_site_url": "sc-domain:" + host})
     assert response.status_code == 422
     assert client.get("/api/settings").json()["gsc_site_url"] == ""
+
+
+@pytest.mark.parametrize("site", ["sc-domain:straße.de", "sc-domain:مثال1.com", "https://straße.de/Blog/"])
+def test_gsc_queries_the_exact_saved_property(client, monkeypatch, site):
+    configure_gsc(client, monkeypatch)
+    assert client.put("/api/settings", json={"gsc_site_url": site}).status_code == 200
+    paths = []
+
+    def handler(request):
+        paths.append(request.url.raw_path.decode())
+        return httpx.Response(200, json={})
+
+    mock_http(monkeypatch, handler)
+    gsc.SearchConsoleKeywords().rows()
+    assert paths == ["/webmasters/v3/sites/" + quote(site, safe="") + "/searchAnalytics/query"]
 
 
 def test_new_credentials_redaction_env_precedence_clear(client, monkeypatch):
