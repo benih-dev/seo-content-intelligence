@@ -14,6 +14,7 @@ import {
   SectionTitle,
 } from "@/components/ui";
 import { ProjectForm } from "@/components/project-form";
+import { TabList } from "@/components/tab-list";
 
 export default function ProjectPage({
   params,
@@ -114,21 +115,22 @@ export default function ProjectPage({
               New content run
             </Link>
           </SectionTitle>
-          <div className="tabs" role="tablist" aria-label="Project sections">
-            {["overview", "profile", "inventory"].map((t) => (
-              <button
-                key={t}
-                role="tab"
-                aria-selected={tab === t}
-                onClick={() => setTab(t)}
-              >
+          <TabList
+            id="project"
+            label="Project sections"
+            selected={tab}
+            onSelect={setTab}
+            tabs={["overview", "profile", "inventory"].map((t) => ({ id: t, content: <>
                 {t[0].toUpperCase() + t.slice(1)}
                 {t === "inventory" && (
                   <span className="count">{items.length}</span>
                 )}
-              </button>
-            ))}
-          </div>
+              </> }))}
+          />
+          {["overview", "profile", "inventory"].filter((t) => t !== tab).map((t) => (
+            <div key={t} id={`project-panel-${t}`} role="tabpanel" aria-labelledby={`project-tab-${t}`} hidden />
+          ))}
+          <div id={`project-panel-${tab}`} role="tabpanel" aria-labelledby={`project-tab-${tab}`} tabIndex={0}>
           {tab === "overview" && (
             <>
               <div className="context-card">
@@ -318,6 +320,7 @@ export default function ProjectPage({
               </Panel>
             </>
           )}
+          </div>
         </>
       )}
     </div>

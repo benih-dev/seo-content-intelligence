@@ -278,7 +278,7 @@ export function ArticlePanel({
           )}
           {mode === "diff" && (
             <div className="diff-wrap">
-              <h3>What changed?</h3>
+              <h2>What changed?</h2>
               <p className="muted">
                 Compare immutable article versions, line by line.
               </p>
@@ -348,7 +348,7 @@ export function ArticlePanel({
             </span>
           </div>
         </section>
-        <aside className="article-aside">
+        <aside className="article-aside" aria-label="Article details and exports">
           <Panel title="Article details">
             <dl className="definition-list">
               <div>
@@ -450,6 +450,20 @@ export function ArticlePanel({
                 placeholder="Record your editorial decision or describe the revision you need."
               />
             </label>
+            {selected.id !== latest.id && (
+              <div className="notice">
+                <span>You are reviewing an older draft. Switch to the latest version before approving.</span>
+                <button
+                  className="button"
+                  onClick={() => {
+                    setVersion(latest.version);
+                    setBody(latest.body_md);
+                  }}
+                >
+                  Review latest version
+                </button>
+              </div>
+            )}
             <div className="approval-actions">
               <p className="muted">
                 Approval enables exports. Nothing is published automatically.
@@ -472,13 +486,14 @@ export function ArticlePanel({
                 className="button primary"
                 disabled={
                   busy ||
+                  selected.id !== latest.id ||
                   (!!run.qa_reviews.at(-1)?.data.expert_review_required &&
                     (!expert || !comment.trim()))
                 }
                 onClick={() =>
                   command("approve", {
                     stage: "final",
-                    payload: { expert_reviewed: expert },
+                    payload: { expert_reviewed: expert, draft_id: selected.id, draft_version: selected.version },
                     comment,
                   })
                 }

@@ -70,6 +70,20 @@ export function ActivityPanel({ run }: { run: Run }) {
           </table>
         </div>
       </Panel>
+      <Panel title="Approval decisions" eyebrow="HUMAN REVIEW RECORD">
+        {run.approvals.length ? run.approvals.toReversed().map((approval) => (
+          <article key={approval.id} className="timeline-item">
+            <div>
+              <div className="timeline-top">
+                <strong>{label(approval.stage)} · {label(approval.decision)}</strong>
+                <time>{date(approval.created_at)}</time>
+              </div>
+              <p>{approval.comment.trim() || "No reviewer comment provided."}</p>
+              <small>{approval.actor_id}</small>
+            </div>
+          </article>
+        )) : <p className="muted">No approval decisions recorded yet.</p>}
+      </Panel>
       <Panel title="Audit trail" eyebrow="EVERY STAGE. EVERY DECISION.">
         <div className="timeline">
           {run.audit.toReversed().map((event) => (
