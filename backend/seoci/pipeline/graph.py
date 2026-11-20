@@ -15,7 +15,7 @@ from seoci.export import build_exports, render_md, row_dict
 from seoci.models import (ArticleDraft, AuditEvent, ContentBrief, EvidenceItem, KeywordMetricSnapshot,
                           KeywordRecord, Project, QAReview, ResearchSource, SERPResult, SERPSnapshot,
                           SiteContentItem, StageArtifact, WorkflowRun)
-from seoci.pipeline.quality import check_article, opportunity, overlap, ymyl
+from seoci.pipeline.quality import annotate_internal_links, suggest_internal_links, check_article, opportunity, overlap, ymyl
 from seoci.pipeline.state import transition
 from seoci.providers.keywords import get_keywords
 from seoci.providers.llm import Brief, Draft, Intent, QA, SEO, Strategy, get_llm
@@ -149,8 +149,22 @@ def strategy(db, run):
     return data
 
 
+def internal_links(db, run, data):
+    inventory = list(db.scalars(select(SiteContentItem).where(SiteContentItem.project_id == run.project_id)))
+    links = annotate_internal_links(data.get("internal_links", []), inventory)
+    if not links and not data.get("internal_links"):
+        topic = " ".join([run.primary_keyword] + [x["heading"] for x in data["outline"]] + data.get("subtopics", []))
+        links = suggest_internal_links(inventory, topic)
+    return links
+
+
 def brief(db, run):
-    data = llm_call(db, run, "brief", Brief)
+    strategy_data = (artifact(db, run.id, "strategy") or StageArtifact(data={})).data
+    strategy_view = {k: strategy_data.get(k, "") for k in ("angle", "rationale", "differentiation")}
+    data = llm_call(db, run, "brief", Brief, {"strategy": strategy_view})
+    for key in ("rationale", "differentiation"):
+        data[key] = data.get(key) or strategy_view[key]
+    data["internal_links"] = internal_links(db, run, data)
     row = ContentBrief(run_id=run.id, data=data)
     db.add(row)
     db.flush()
@@ -168,11 +182,14 @@ def brief_review(state):
         edits = decision.get("payload", {}).get("edits")
         if edits:
             data = Brief.model_validate({**row.data, **edits}).model_dump()
-            row = ContentBrief(run_id=run.id, version=row.version + 1, data=data)
-            db.add(row)
+            data["internal_links"] = annotate_internal_links(data["internal_links"], db.scalars(
+                select(SiteContentItem).where(SiteContentItem.project_id == run.project_id)))
+            if data != row.data:
+                row = ContentBrief(run_id=run.id, version=row.version + 1, data=data)
+                db.add(row)
         row.status = "approved"
         db.flush()
-        transition(db, run, "evidence_research", actor="user", reason="Brief approved", artifact_ref=row.id)
+        transition(db, run, "evidence_research", actor="user", reason=f"Brief v{row.version} approved", artifact_ref=row.id)
         db.commit()
     return {}
 

@@ -63,14 +63,26 @@ export interface Keyword extends Version {
     serp_snapshot_id: string;
   };
 }
+export interface BriefLink {
+  url: string;
+  title: string;
+  anchor: string;
+  reason: string;
+  status: "inventory" | "search_suggestion";
+}
 export interface BriefData {
   angle: string;
+  rationale: string;
+  differentiation: string;
   audience: string;
   intent: string;
   outline: { level: number; heading: string; purpose: string }[];
   questions: string[];
+  subtopics: string[];
+  entities: string[];
+  examples: string[];
   exclusions: string[];
-  internal_links: string[];
+  internal_links: BriefLink[];
   source_plan: string[];
 }
 export interface Brief extends Version {
