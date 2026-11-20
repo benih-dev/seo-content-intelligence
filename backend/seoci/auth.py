@@ -118,9 +118,8 @@ def signature(secret, value):
     return hmac.new(secret, value.encode(), hashlib.sha256).hexdigest()
 
 
-def create_session(username):
+def create_session(username, password_hash):
     secret = signing_secret()
-    password_hash = load_users()[username]
     payload = {"u": username, "e": int(time.time()) + SESSION_SECONDS, "v": signature(secret, password_hash)}
     body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
     return body + "." + signature(secret, body)

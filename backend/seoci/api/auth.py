@@ -38,8 +38,8 @@ def audit(username, action):
         db.commit()
 
 
-def set_session(response, request, username):
-    response.set_cookie(auth.COOKIE, auth.create_session(username), max_age=auth.SESSION_SECONDS,
+def set_session(response, request, username, password_hash):
+    response.set_cookie(auth.COOKIE, auth.create_session(username, password_hash), max_age=auth.SESSION_SECONDS,
                         httponly=True, samesite="lax", path="/",
                         secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https")
     response.headers["Cache-Control"] = "no-store"
@@ -75,7 +75,7 @@ def login(body: Credentials, request: Request, response: Response):
         audit(body.username, "auth_login_failed")
         raise HTTPException(401, "Invalid username or password")
     auth.throttle.reset(key)
-    set_session(response, request, body.username)
+    set_session(response, request, body.username, encoded)
     audit(body.username, "auth_login")
     return {"username": body.username}
 

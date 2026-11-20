@@ -80,6 +80,23 @@ def test_cli_hash_update_and_live_file_reload(raw_client, monkeypatch, capsys):
     assert setup(raw_client).status_code == 409
 
 
+def test_password_rotation_during_login_invalidates_issued_session(raw_client, monkeypatch):
+    setup(raw_client)
+    verify = auth.verify_password
+
+    def verify_then_rotate(password, encoded):
+        valid = verify(password, encoded)
+        auth.add_user("owner", "rotated-password")
+        return valid
+
+    monkeypatch.setattr(auth, "verify_password", verify_then_rotate)
+    assert login(raw_client).status_code == 200
+    assert auth.session_user(raw_client.cookies.get(auth.COOKIE)) is None
+    assert raw_client.get("/api/auth/me").status_code == 401
+    monkeypatch.setattr(auth, "verify_password", verify)
+    assert login(raw_client, password="rotated-password").status_code == 200
+
+
 def test_throttle_per_username_and_ip(raw_client, monkeypatch):
     setup(raw_client)
     for _ in range(5):

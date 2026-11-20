@@ -33,7 +33,7 @@ def raw_client(tmp_path, monkeypatch):
 @pytest.fixture
 def client(raw_client, user_hash):
     auth.users_path().write_text(f"tester:{user_hash}\n")
-    raw_client.cookies.set(auth.COOKIE, auth.create_session("tester"))
+    raw_client.cookies.set(auth.COOKIE, auth.create_session("tester", user_hash))
     return raw_client
 
 
