@@ -4,6 +4,7 @@ from xml.etree import ElementTree
 import httpx
 
 from seoci.providers.network import request, safe_url
+from seoci.urls import site_hostname
 
 
 def project_url(url, domain):
@@ -19,7 +20,7 @@ def project_url(url, domain):
         valid = False
     if not valid:
         raise ValueError("Enter a complete URL starting with https:// or http://")
-    if parsed.hostname.removeprefix("www.") != urlparse(domain).hostname.removeprefix("www."):
+    if site_hostname(parsed.hostname) != site_hostname(urlparse(domain).hostname):
         raise ValueError("URL must belong to the project website")
     return parsed
 

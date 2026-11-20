@@ -22,3 +22,15 @@ def test_qa_rejects_self_link_even_when_inventory_contains_it(href):
 def test_slug_suffix_uses_available_path():
     assert available_slug("guide", "https://example.com", []) == "guide"
     assert available_slug("guide", "https://example.com", ["https://example.com/guide/", "https://example.com/guide-2"]) == "guide-3"
+
+
+def test_www_inventory_alias_is_the_same_site_for_slug_and_link_checks():
+    domain = "https://example.com"
+    inventory = ["https://www.example.com/guide", "https://www.example.com/known"]
+    assert available_slug("guide", domain, inventory) == "guide-2"
+    body = "# Guide\n\n[Known](https://example.com/known) [Missing](https://www.example.com/missing)"
+    result = check_article(body, {"slug": "guide"}, [], inventory, "gardening", project_domain=domain)
+    assert any(f["finding"] == "Slug collides with existing content" for f in result["findings"])
+    assert [f["location"] for f in result["findings"] if f["finding"] == "Unknown internal link"] == [
+        "https://www.example.com/missing",
+    ]
