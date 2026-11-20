@@ -49,6 +49,13 @@ def test_redactor():
         assert secret not in safe
 
 
+@pytest.mark.parametrize("account", ["null", "[]", '"text"', "true", "1", "{invalid", '{"private_key": ["nested"]}'])
+def test_redactor_tolerates_any_service_account_json(account, monkeypatch):
+    monkeypatch.setattr("seoci.diagnostics._secrets", set())
+    assert redact("Startup diagnostics", {"gsc_service_account_json": account}) == "Startup diagnostics"
+    assert account not in redact(account)
+
+
 def test_failure_persistence_and_redaction(client, project, monkeypatch, caplog):
     key = "injected-fake-provider-key"
     client.put("/api/settings", json={"llm_model": "openai/custom", "llm_api_base": "http://127.0.0.1:9/v1", "llm_api_key": key})

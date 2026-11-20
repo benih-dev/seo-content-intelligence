@@ -31,10 +31,11 @@ def redact(value, config=None):
                 _secrets.add(json.dumps(secret)[1:-1])
                 if key == "gsc_service_account_json":
                     try:
-                        for item in json.loads(secret).values():
+                        account = json.loads(secret)
+                        for item in account.values() if isinstance(account, dict) else ():
                             if isinstance(item, str) and item:
                                 _secrets.update((item, json.dumps(item)[1:-1]))
-                    except (ValueError, TypeError):
+                    except (ValueError, TypeError, RecursionError):
                         pass
         _secrets.update(v for k, v in os.environ.items() if v and any(x in k for x in ("API_KEY", "TOKEN", "PASSWORD", "AUTH_SECRET")))
     text = str(value)
