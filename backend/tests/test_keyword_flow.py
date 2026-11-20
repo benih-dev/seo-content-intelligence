@@ -5,6 +5,7 @@ import pytest
 from seoci.pipeline.quality import WEIGHTS, opportunity, overlap
 from seoci.providers.keywords import MockKeywords
 from seoci.providers.llm import Intent
+from seoci.providers.serp import MockSerp
 from seoci.worker import work_once
 from tests.conftest import approve, detail, new_run
 
@@ -103,3 +104,44 @@ def test_inventory_coverage_persisted(client, project):
     run = new_run(client, project)
     work_once()
     assert detail(client, run)["keywords"][0]["data"]["inventory_missing_metadata"] == 1
+
+
+@pytest.mark.parametrize("keyword,title,expected", [
+    ("vertikultur di rumah untuk pemula", "Berkebun di balkon: panduan untuk pemula", False),
+    ("gardening for beginners", "How to bake: a guide for beginners", False),
+    ("di untuk panduan pemula", "di untuk panduan pemula", False),
+    ("balkon untuk pemula", "Panduan berkebun di balkon", True),
+    ("gardening guide", "Gardening for beginners", True),
+])
+def test_overlap_requires_meaningful_tokens(keyword, title, expected):
+    assert bool(overlap(keyword, [SimpleNamespace(url="https://example.com/", title=title, slug="")])) == expected
+
+
+def test_fit_scores_ignore_generic_terms():
+    project = {"niche": "di untuk pemula", "audience": "panduan", "business_objective": "di untuk panduan"}
+    score = opportunity({"volume": None}, False, "vertikultur di rumah untuk pemula", project)
+    for key in ("blog_topic_fit", "business_value"):
+        assert score["dimensions"][key]["score"] == 50
+        assert "none;" in score["dimensions"][key]["reason"]
+    project.update(niche="vertikultur untuk pemula", business_objective="vertikultur di rumah")
+    score = opportunity({"volume": None}, False, "vertikultur di rumah untuk pemula", project)
+    assert "vertikultur" in score["dimensions"]["blog_topic_fit"]["reason"]
+    assert score["dimensions"]["business_value"]["score"] == 100
+
+
+def test_mock_fallback_is_not_keyword_titled_competitor():
+    snapshot = MockSerp().search("unusual topic zyx", "en-US")
+    assert snapshot["mock"] is True
+    assert "unusual topic zyx" not in snapshot["results"][0]["title"]
+    assert "not a competitor" in snapshot["results"][0]["title"]
+
+
+def test_cancel_keyword_gate_for_restart(client, project):
+    run = new_run(client, project)
+    work_once()
+    assert client.post(f"/api/runs/{run}/cancel").status_code == 200
+    assert detail(client, run)["state"] == "cancelled"
+    assert client.post(f"/api/runs/{run}/approve", json={"stage": "keyword"}).status_code == 409
+    replacement = new_run(client, project, "another keyword")
+    work_once()
+    assert detail(client, replacement)["state"] == "keyword_review"

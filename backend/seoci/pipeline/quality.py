@@ -5,14 +5,22 @@ DIMENSIONS = ["Intent satisfaction", "Accuracy & evidence", "Original value", "E
               "On-page completeness", "Trust & accountability"]
 WEIGHTS = {"blog_topic_fit": .25, "intent_fit": .20, "serp_attainability_gap": .20,
            "business_value": .15, "demand_signals": .10, "data_confidence": .10}
+OVERLAP_STOPWORDS = set("""di ke dari untuk yang dan atau dengan pada dalam adalah ini itu
+    cara panduan pemula tips bagi sebuah serta tentang belajar langkah mudah praktis
+    the a an for to how guide guides beginner beginners tips of in on at and or with
+    from by is are your you our this that learn easy practical step steps""".split())
+
+
+def meaningful_tokens(text):
+    return set(re.findall(r"\w+", text.lower())) - OVERLAP_STOPWORDS
 
 
 def opportunity(metrics, serp, keyword="", project=None, intent=None):
     available = metrics.get("volume") is not None
     project = project or {}
-    tokens = set(re.findall(r"\w+", keyword.lower()))
-    niche_tokens = set(re.findall(r"\w+", (project.get("niche", "") + " " + project.get("audience", "")).lower()))
-    business_tokens = set(re.findall(r"\w+", project.get("business_objective", "").lower()))
+    tokens = meaningful_tokens(keyword)
+    niche_tokens = meaningful_tokens(project.get("niche", "") + " " + project.get("audience", ""))
+    business_tokens = meaningful_tokens(project.get("business_objective", ""))
     fit = len(tokens & niche_tokens) / max(1, len(tokens))
     business = len(tokens & business_tokens) / max(1, len(tokens))
     scores = {"blog_topic_fit": round(50 + 50 * fit), "intent_fit": 75 if intent == "informational" else 50,
@@ -35,10 +43,10 @@ def opportunity(metrics, serp, keyword="", project=None, intent=None):
 
 
 def overlap(keyword, inventory):
-    tokens = set(re.findall(r"\w+", keyword.lower()))
-    return [{"url": x.url, "reason": "Shared keyword/title/slug tokens; consider updating existing article",
+    tokens = meaningful_tokens(keyword)
+    return [{"url": x.url, "reason": "Shared meaningful keyword/title/slug/URL tokens; consider updating existing article",
              "recommendation": "update_existing_or_differentiate"} for x in inventory
-            if len(tokens & set(re.findall(r"\w+", (x.title + " " + x.slug + " " + urlparse(x.url).path).lower()))) / max(1, len(tokens)) >= .5]
+            if tokens and len(tokens & meaningful_tokens(x.title + " " + x.slug + " " + urlparse(x.url).path)) / len(tokens) >= .5]
 
 
 def ymyl(keyword):

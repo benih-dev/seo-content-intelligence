@@ -50,7 +50,8 @@ export default function ProjectPage({
     setError("");
     setBusy(true);
     setResult("");
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     try {
       const response = await api<{
         items: ContentItem[];
@@ -71,8 +72,9 @@ export default function ProjectPage({
       );
       setItems(await api<ContentItem[]>(`/projects/${id}/content-items`));
       setResult(
-        `Imported ${response.items.length} URLs.${response.failures.length ? " Skipped: " + response.failures.map((x) => `${x.url}: ${x.error}`).join("; ") : " No errors."}`,
+        `Imported ${response.items.length} ${response.items.length === 1 ? "URL" : "URLs"}.${response.failures.length ? " Skipped: " + response.failures.map((x) => `${x.url}: ${x.error}`).join("; ") : " No errors."}`,
       );
+      if (!sitemap && response.items.length > 0 && !response.failures.length) formElement.reset();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -280,7 +282,7 @@ export default function ProjectPage({
                   {result}
                 </div>
               )}
-              <Panel title={`Known content · ${items.length} URLs`}>
+              <Panel title={`Known content · ${items.length} ${items.length === 1 ? "URL" : "URLs"}`}>
                 {!items.length ? (
                   <Empty title="No content imported yet">
                     Add your existing pages to detect overlap and suggest
