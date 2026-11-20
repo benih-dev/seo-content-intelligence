@@ -169,6 +169,7 @@ small {
   min-height: 100vh;
 }
 .sidebar {
+  overflow-y: auto;
   width: 244px;
   background: var(--subtle);
   border-right: 1px solid var(--line);

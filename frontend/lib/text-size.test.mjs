@@ -89,3 +89,8 @@ test("typography uses readable rem sizes that follow the root text size", () => 
   assert.match(css, /:root\[data-text-size="small"\]\s*\{\s*font-size: 87\.5%;/);
   assert.match(css, /:root\[data-text-size="large"\]\s*\{\s*font-size: 112\.5%;/);
 });
+
+test("sidebar allows vertical scrolling so large text cannot strand the footer", () => {
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(css, /\.sidebar\s*\{[^}]*overflow-y: auto;/);
+});
