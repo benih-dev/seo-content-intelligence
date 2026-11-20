@@ -13,8 +13,8 @@ from seoci.config import settings
 from seoci.db import Session
 from seoci.export import build_exports, render_md, row_dict
 from seoci.models import (ArticleDraft, AuditEvent, ContentBrief, EvidenceItem, KeywordMetricSnapshot,
-                          KeywordRecord, Project, QAReview, ResearchSource, SERPResult, SERPSnapshot,
-                          SiteContentItem, StageArtifact, WorkflowRun)
+                          Job, KeywordRecord, Project, QAReview, ResearchSource, SERPResult, SERPSnapshot,
+                          SiteContentItem, StageArtifact, WorkflowRun, now)
 from seoci.pipeline.quality import check_article, opportunity, overlap, ymyl
 from seoci.pipeline.state import transition
 from seoci.providers.keywords import get_keywords
@@ -84,6 +84,8 @@ def stage(name, fn, version_fn=lambda db, run: 1):
                 db.add(row)
                 db.flush()
                 db.add(AuditEvent(run_id=run.id, actor="system", action="stage_complete", data={"stage": name, "artifact_id": row.id, "version": version, "latency_ms": round((time.monotonic()-start)*1000)}))
+                for job in db.scalars(select(Job).where(Job.run_id == run.id, Job.status == "running")):
+                    job.heartbeat_at = now()
                 db.commit()
             finally:
                 active_session.reset(token)

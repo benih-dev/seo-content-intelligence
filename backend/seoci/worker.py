@@ -2,9 +2,10 @@ import argparse
 import logging
 import signal
 import time
+from threading import Event, Thread
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 from seoci.config import settings
 from seoci.db import Session, init_db
@@ -13,6 +14,7 @@ from seoci.pipeline.graph import execute
 from seoci.pipeline.state import transition
 
 log = logging.getLogger("seoci.worker")
+HEARTBEAT_SECONDS = 30
 
 
 def claim_job():
@@ -21,7 +23,7 @@ def claim_job():
             db.execute(text("BEGIN IMMEDIATE"))
         # A crashed worker's lease can be reclaimed after network calls have timed out.
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
-        for stale in db.scalars(select(Job).where(Job.status == "running", Job.started_at < cutoff)):
+        for stale in db.scalars(select(Job).where(Job.status == "running", func.coalesce(Job.heartbeat_at, Job.started_at) < cutoff)):
             stale.status = "pending"
         query = select(Job).where(Job.status == "pending").order_by(Job.created_at).limit(1)
         if db.bind.dialect.name != "sqlite":
@@ -31,9 +33,23 @@ def claim_job():
             db.commit()
             return None
         job.status, job.started_at = "running", now()
+        job.heartbeat_at = job.started_at
         job.attempts += 1
         db.commit()
         return job.id
+
+
+def heartbeat(job_id, stopped):
+    while not stopped.wait(HEARTBEAT_SECONDS):
+        try:
+            with Session() as db:
+                job = db.get(Job, job_id)
+                if not job or job.status != "running":
+                    return
+                job.heartbeat_at = now()
+                db.commit()
+        except Exception:
+            log.exception("Could not refresh job lease %s", job_id)
 
 
 def work_once():
@@ -48,6 +64,9 @@ def work_once():
             db.commit()
             return True
         payload, run_id = job.payload, job.run_id
+    stopped = Event()
+    monitor = Thread(target=heartbeat, args=(job_id, stopped), daemon=True)
+    monitor.start()
     try:
         execute(run_id, payload)
         with Session() as db:
@@ -66,6 +85,9 @@ def work_once():
                 transition(db, run, "failed", reason=str(exc))
             db.add(AuditEvent(run_id=run_id, actor="system", action="job_error", data={"error": str(exc), "type": type(exc).__name__, "attempt": job.attempts}))
             db.commit()
+    finally:
+        stopped.set()
+        monitor.join()
     return True
 
 
