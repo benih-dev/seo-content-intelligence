@@ -2638,3 +2638,18 @@ input::placeholder, textarea::placeholder {
   padding: 12px;
   overflow: auto;
 }
+.settings-modes,
+.settings-secret-status,
+.settings-save {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.settings-secret-status {
+  margin-top: 10px;
+}
+.settings-save p {
+  margin: 0;
+  color: var(--success);
+}

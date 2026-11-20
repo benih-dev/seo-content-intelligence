@@ -225,6 +225,39 @@ Untuk SQLite default, backup **keduanya**: `backend/data/seoci.db` dan
 aktif. Lokasi relatif mengikuti direktori kerja backend. Untuk PostgreSQL, backup
 database aplikasi beserta tabel checkpoint. Jangan menyimpan token di Git/browser.
 
+## Settings melalui web
+
+Buka **Settings** di sidebar (`/settings`) untuk mengatur LLM, DataForSEO dan
+GitHub tanpa mengubah environment atau me-restart API/worker. Jalankan
+`(cd backend && uv run alembic upgrade head)` saat upgrade; migration `0004`
+menambahkan tabel `app_settings` dan audit aplikasi.
+
+Nilai yang tersimpan di database mengungguli environment/Settings. Field yang
+belum tersimpan memakai environment lalu default aplikasi. Model LLM kosong
+tetap berarti mock; base URL kosong memakai endpoint bawaan LiteLLM. Kunci LLM
+tersimpan diteruskan sebagai `api_key`; jika belum ada, aplikasi memakai
+`LLM_API_KEY`, lalu `OPENAI_API_KEY` atau `ANTHROPIC_API_KEY` untuk model provider
+tersebut. Provider LiteLLM lain tetap dapat memakai environment kredensialnya.
+API dan worker membaca ulang konfigurasi saat pemakaian berikutnya. Panggilan
+yang sedang berjalan tidak diubah dan hasil provider yang sudah di-cache tetap
+mengikuti TTL cache.
+
+Input rahasia selalu kosong saat halaman dimuat. Biarkan kosong untuk menjaga
+kunci lama; masukkan nilai baru untuk mengganti. **Clear**, lalu **Save settings**,
+menghapus nilai database saja: kunci environment dapat tetap berstatus configured.
+Badge membedakan sumber database dan environment; nilai kunci tidak pernah
+dikembalikan oleh API. `GET /api/settings` memberi nilai non-rahasia dan metadata
+`{configured, source}` untuk rahasia. `PUT /api/settings` menerima update parsial;
+field yang dihilangkan tidak berubah dan `null` menghapus override database.
+Audit hanya mencatat nama field yang berubah.
+
+**Penting:** aplikasi tidak memiliki login. Semua orang yang dapat mengaksesnya
+dapat mengganti konfigurasi. Batasi akses ke localhost/jaringan tepercaya atau
+gunakan lapisan autentikasi di depannya. Kunci disimpan sebagai plaintext di
+database (bukan dienkripsi), sehingga file/volume database dan backup harus
+dilindungi. Write-only berarti kunci tidak ditampilkan kembali, bukan bahwa
+penyimpanan database terenkripsi.
+
 ## Konfigurasi lingkungan
 
 Sumber: [`backend/seoci/config.py`](backend/seoci/config.py),
@@ -249,6 +282,7 @@ Sumber: [`backend/seoci/config.py`](backend/seoci/config.py),
 | `DATABASE_URL` | `sqlite:///./data/seoci.db` | Database SQLAlchemy dan dasar lokasi checkpoint; Compose memakai PostgreSQL. |
 | `LLM_MODEL` | kosong | Kosong memilih mock; isi identifier LiteLLM seperti `openai/gpt-4o-mini` untuk model nyata. |
 | `LLM_API_BASE` | kosong | Opsional: base URL endpoint LLM yang diteruskan sebagai `api_base` ke LiteLLM. Kosong mempertahankan endpoint bawaan provider; Compose meneruskannya ke API dan worker. |
+| `LLM_API_KEY` | kosong | Kunci generik opsional, diteruskan sebagai `api_key` ke LiteLLM; dapat diganti lewat Settings. Compose meneruskannya ke API dan worker. |
 | `OPENAI_API_KEY` | tidak disetel aplikasi | Kunci OpenAI, dibaca LiteLLM; Compose meneruskan nilai atau string kosong. |
 | `ANTHROPIC_API_KEY` | tidak disetel aplikasi | Kunci Anthropic bila identifier LiteLLM memakai provider itu; Compose juga meneruskannya. |
 | `SERP_PROVIDER` | `mock` | `mock` atau `dataforseo`; mengendalikan SERP, keyword dan penemuan sumber riset. |
@@ -288,7 +322,8 @@ export OPENAI_API_KEY=your-endpoint-key
 
 Ganti `custom-model`, host, port dan kunci sesuai endpoint Anda. Kredensial tetap
 memakai environment provider (`OPENAI_API_KEY` untuk prefix `openai/`), yang dibaca
-LiteLLM juga saat memakai base URL khusus; tidak ada setting `LLM_API_KEY`.
+LiteLLM juga saat memakai base URL khusus. `LLM_API_KEY` atau kunci yang disimpan
+lewat Settings mengungguli kunci environment provider yang dipilih.
 Untuk Compose, simpan nilai tersebut di `.env` root atau environment host;
 alamat endpoint harus dapat dijangkau dari container API dan worker (bukan
 `localhost` host). Mengisi `LLM_API_BASE` tanpa `LLM_MODEL` tetap memilih mock.

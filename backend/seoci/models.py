@@ -166,8 +166,16 @@ class ApprovalEvent(Versioned, Base):
 
 class AuditEvent(Versioned, Base):
     __tablename__ = "audit_events"
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=True)
     actor: Mapped[str]
     action: Mapped[str]
+
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[str] = mapped_column(default=now, onupdate=now)
 
 
 class Job(Identity, Base):

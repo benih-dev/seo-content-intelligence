@@ -52,6 +52,13 @@ are returned. Public-host validation is defense in depth, not a substitute for a
 JSON unless noted. All ids are UUID strings; times are ISO-8601 UTC strings. Errors:
 `{"detail":"message"}`; validation 422 uses FastAPI's standard `detail` array. 404 missing object,
 409 invalid state/active job/idempotency conflict. Collection endpoints return arrays, not envelopes.
+`GET /api/settings` returns effective non-secret provider settings and only
+`{configured, source}` metadata for each secret. `PUT /api/settings` accepts
+partial updates; omitted fields stay unchanged and `null` removes a DB override.
+Its validation errors return a generic message and field names, never input values.
+See [web Settings](../README.md#settings-melalui-web) for precedence, write-only
+credentials, audit behavior and the unauthenticated deployment warning.
+
 Mutating pipeline commands enqueue a job and return immediately; poll detail every two seconds.
 GitHub publishing is a synchronous connector request, not a worker job.
 `POST /approve` still returns the **current** gate state, not an optimistic next state.
