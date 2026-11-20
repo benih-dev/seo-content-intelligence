@@ -128,6 +128,7 @@ def test_manual_versions_and_diff(client, project):
     old = detail(client, run)["drafts"][-1]
     endpoint = f"/api/runs/{run}/draft"
     assert client.put(endpoint, json={"body_md": old["body_md"]}).status_code == 409
+    assert client.put(endpoint, json={"body_md": old["body_md"], "metadata_json": {"h1": "Not the article's heading"}}).status_code == 409
     assert client.put(endpoint, json={"body_md": " \n "}).status_code == 422
     body = "Berkebun di balkon:\n*catatan editor*\n===" + old["body_md"][old["body_md"].index("\n"):]
     response = client.put(endpoint, json={"body_md": body + "\n\nCatatan editor: sesuaikan dengan kondisi Anda."})

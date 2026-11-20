@@ -242,17 +242,17 @@ def edit_draft(run_id: str, body: DraftInput, db=Depends(database)):
     old = latest(db, ArticleDraft, run_id)
     if not old:
         raise HTTPException(409, "No draft exists")
-    metadata = {**old.metadata_json, **(body.metadata_json or {})}
     if not body.body_md.strip():
         raise HTTPException(422, "Article Markdown cannot be blank")
-    if body.body_md == old.body_md and metadata == old.metadata_json:
+    metadata = with_article_h1(body.body_md, {**old.metadata_json, **(body.metadata_json or {})})
+    if body.body_md == old.body_md and metadata == {**old.metadata_json, "h1": metadata["h1"]}:
         raise HTTPException(409, "No draft changes to save")
     if run.state == "blocked":
         run.resume_state = "revision_required"
         transition(db, run, "resumed", actor="user", reason="Manual takeover")
     transition(db, run, "revision_required", actor="user", reason="Manual draft edit")
     draft = ArticleDraft(run_id=run_id, version=old.version + 1, body_md=body.body_md,
-                         body_html=render_md(body.body_md), metadata_json=with_article_h1(body.body_md, metadata),
+                         body_html=render_md(body.body_md), metadata_json=metadata,
                          data={"change_log": "Manual edit", "origin": "manual"})
     db.add(draft)
     db.flush()
