@@ -25,6 +25,7 @@ class Project(Identity, Base):
     country: Mapped[str] = mapped_column(default="ID")
     voice_profile: Mapped[str] = mapped_column(default="clear, practical, helpful")
     rules: Mapped[dict] = mapped_column(JSON, default=dict)
+    publishing: Mapped[dict] = mapped_column(JSON, default=dict)
     business_objective: Mapped[str] = mapped_column(default="Educate readers")
     version: Mapped[int] = mapped_column(default=1)
     created_at: Mapped[str] = mapped_column(default=now)

@@ -162,6 +162,30 @@ function field(key: Exclude<keyof ProjectInput, "rules">, value: string) {
             onChange={(e) => field("voice_profile", e.target.value)}
           />
         </label>
+        <fieldset className="form-grid">
+          <legend>GitHub pull request settings</legend>
+          {([
+            ["github_repo", "Repository (owner/name)", ""],
+            ["base_branch", "Base branch", "main"],
+            ["content_dir", "Content directory", "src/content/blog"],
+          ] as const).map(([key, title, fallback]) => (
+            <label key={key}>
+              {title}
+              <input
+                value={form.publishing?.[key] ?? fallback}
+                onChange={(e) => setForm({ ...form, publishing: {
+                  ...form.publishing, [key]: e.target.value,
+                } })}
+                placeholder={key === "github_repo" ? "benih-dev/benihkode" : fallback}
+              />
+            </label>
+          ))}
+          <label>
+            File extension
+            <input value="md" readOnly />
+          </label>
+          <small>Creates a PR for review only. Never merges or publishes automatically.</small>
+        </fieldset>
         <label>
           Business objective
           <input

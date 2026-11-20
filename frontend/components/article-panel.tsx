@@ -14,7 +14,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { api, date, label } from "@/lib/api";
-import type { QAReview, Run } from "@/lib/types";
+import type { GitHubPublish, QAReview, Run } from "@/lib/types";
 import { Badge, Empty, ErrorNotice, Panel } from "./ui";
 import type { Command } from "./keyword-panel";
 
@@ -155,6 +155,20 @@ export function ArticlePanel({
   const [diffBusy, setDiffBusy] = useState(false);
   const [comment, setComment] = useState("");
   const [expert, setExpert] = useState(false);
+  const [githubPublish, setGithubPublish] = useState(run.github_publish);
+  const [publishBusy, setPublishBusy] = useState(false);
+  const [publishError, setPublishError] = useState("");
+  async function publishGithub() {
+    setPublishBusy(true);
+    setPublishError("");
+    try {
+      setGithubPublish(await api<GitHubPublish>(`/runs/${run.id}/publish/github`, {}));
+    } catch (e) {
+      setPublishError((e as Error).message);
+    } finally {
+      setPublishBusy(false);
+    }
+  }
   if (!latest)
     return (
       <Empty title="Your article is on its way">
@@ -426,6 +440,21 @@ export function ArticlePanel({
             <Findings review={review} />
           </Panel>
           <Panel title="Export package" eyebrow="PORTABLE BY DESIGN">
+            {!!run.exports.length && (
+              <div className="form-stack">
+                {githubPublish || run.github_publish ? (
+                  <a className="button" href={(githubPublish || run.github_publish)!.pr_url}
+                    target="_blank" rel="noreferrer">
+                    Lihat PR #{(githubPublish || run.github_publish)!.pr_number}
+                  </a>
+                ) : (
+                  <button className="button" disabled={busy || publishBusy} onClick={publishGithub}>
+                    {publishBusy ? "Mengirim PR…" : "Kirim PR ke GitHub"}
+                  </button>
+                )}
+                <ErrorNotice error={publishError} />
+              </div>
+            )}
             <p className="muted">
               Article, metadata, sources, and evidence. No CMS lock-in.
             </p>

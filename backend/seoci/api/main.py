@@ -20,6 +20,7 @@ from seoci.pipeline.graph import latest
 from seoci.pipeline.state import transition
 from seoci.providers.llm import Brief, SUPPORTED_INTENTS, validation_message
 from seoci.providers.sitemap import import_sitemap, project_url
+from seoci.publish_github import publish
 
 
 @asynccontextmanager
@@ -207,6 +208,7 @@ def run_detail(run_id: str, db=Depends(database)):
     audit = rows(AuditEvent)
     usage = [x["data"] for x in audit if x["action"] == "llm_usage"]
     return {**row_dict(run), "revision_limit": settings.max_revision_cycles, "mock_revision": not settings.llm_model,
+            "github_publish": run.context.get("github_publish"),
             "artifacts": rows(StageArtifact), "keywords": rows(KeywordRecord),
             "serp_snapshots": rows(SERPSnapshot), "briefs": rows(ContentBrief), "sources": rows(ResearchSource),
             "evidence": rows(EvidenceItem), "drafts": rows(ArticleDraft), "qa_reviews": rows(QAReview),
@@ -214,6 +216,30 @@ def run_detail(run_id: str, db=Depends(database)):
             "usage": {"calls": usage, "cost_usd": sum(x.get("cost_usd", 0) for x in usage),
                       "tokens": sum(x.get("prompt_tokens", 0) + x.get("completion_tokens", 0) for x in usage)},
             "exports": [x.artifact_type for x in db.scalars(select(ArtifactFile).where(ArtifactFile.run_id == run.id))]}
+
+
+@app.post("/api/runs/{run_id}/publish/github")
+def publish_github(run_id: str, db=Depends(database)):
+    run = get_or_404(db, WorkflowRun, run_id)
+    if run.state not in {"article_ready", "exported"}:
+        raise HTTPException(409, "Approve the final article before submitting a GitHub PR")
+    if run.context.get("github_publish"):
+        return run.context["github_publish"]
+    project = get_or_404(db, Project, run.project_id)
+    draft = latest(db, ArticleDraft, run.id)
+    if not draft:
+        raise HTTPException(409, "No article draft is available")
+    qa = latest(db, QAReview, run.id)
+    qa_status = qa.data.get("status", "unknown") if qa else "unknown"
+    db.expunge_all()
+    db.commit()
+    result = publish(project, run, draft, qa_status)
+    run = lock_run(db, run_id)
+    if run.context.get("github_publish"):
+        return run.context["github_publish"]
+    run.context = {**run.context, "github_publish": result}
+    db.commit()
+    return result
 
 
 @app.post("/api/runs/{run_id}/approve", status_code=202)
