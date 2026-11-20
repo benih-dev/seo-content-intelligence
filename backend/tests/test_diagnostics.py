@@ -225,6 +225,22 @@ def test_html_endpoint_classification_preserves_llm_identity(body):
     assert "sk-private-body" not in json.dumps(result) and "<html" not in json.dumps(result)
 
 
+@pytest.mark.parametrize("status,category", [
+    (401, "auth"), (403, "auth"), (404, "model_not_found"), (429, "rate_limit"),
+    (400, "bad_request"), (200, "bad_endpoint"), (500, "bad_endpoint"), (None, "bad_endpoint"),
+])
+def test_html_endpoint_respects_http_status(status, category):
+    exc = litellm.InternalServerError(message="<!doctype html><html>sk-private-body</html>",
+                                    model="openai/custom", llm_provider="openai")
+    exc.status_code = status
+    exc.response = None
+    result = classify(exc, config={})
+    assert result["category"] == category
+    assert result["status"] == status
+    assert result["provider"] == "openai" and result["model"] == "openai/custom"
+    assert "sk-private-body" not in json.dumps(result) and "<html" not in json.dumps(result)
+
+
 def test_html_endpoint_failure_survives_pipeline_wrapping(client, project, monkeypatch):
     client.put("/api/settings", json={"llm_model": "openai/DeepSeek-V4-Flash", "llm_api_base": "https://example.com"})
     exc = litellm.InternalServerError(message="OpenAIException - Empty or invalid response from LLM endpoint. Received: '<!doctype html>sk-private-body'", model="openai/DeepSeek-V4-Flash", llm_provider="openai")

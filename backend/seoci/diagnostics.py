@@ -112,8 +112,6 @@ def classify(exc, provider="pipeline", model="", endpoint="", config=None):
     category = None
     if isinstance(exc, (ValidationError, json.JSONDecodeError)):
         category = "invalid_output"
-    elif is_llm and any(marker in raw for marker in ("empty or invalid response from llm endpoint", "<!doctype html", "<html")):
-        category = "bad_endpoint"
     elif isinstance(exc, (httpx.TimeoutException, TimeoutError)) or "timeout" in kind:
         category = "timeout"
     elif isinstance(exc, (httpx.ConnectError, ConnectionError)) or any(x in kind for x in ("connection", "transport", "dns")):
@@ -130,6 +128,10 @@ def classify(exc, provider="pipeline", model="", endpoint="", config=None):
         category = "rate_limit"
     elif status in (400, 405, 415, 422) or "badrequest" in kind:
         category = "bad_request"
+    elif is_llm and (status is None or 200 <= status < 300 or 500 <= status < 600) and any(
+        marker in raw for marker in ("empty or invalid response from llm endpoint", "<!doctype html", "<html")
+    ):
+        category = "bad_endpoint"
     if category is None:
         if "invalid model output" in raw:
             category = "invalid_output"
