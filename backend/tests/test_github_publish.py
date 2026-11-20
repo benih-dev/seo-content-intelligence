@@ -84,6 +84,26 @@ def test_not_approved(client, ready):
     assert client.post(f"/api/runs/{ready}/publish/github").status_code == 409
 
 
+def test_network_call_releases_lock_and_preserves_concurrent_result(client, ready, monkeypatch):
+    existing = {"pr_url": "https://github.com/owner/blog/pull/1", "pr_number": 1,
+                "branch": "seoci/existing", "path": "src/content/blog/kebun.md"}
+
+    def publish_while_writing(*args):
+        with Session() as db:
+            from sqlalchemy import text
+            db.execute(text("PRAGMA busy_timeout=100"))
+            db.execute(text("BEGIN IMMEDIATE"))
+            run = db.get(WorkflowRun, ready)
+            run.context = {**run.context, "github_publish": existing}
+            db.commit()
+        return {**existing, "pr_number": 2}
+
+    monkeypatch.setattr(main, "publish", publish_while_writing)
+    response = client.post(f"/api/runs/{ready}/publish/github")
+    assert response.status_code == 200, response.text
+    assert response.json() == existing
+
+
 @pytest.mark.parametrize("missing", ["repo", "token"])
 def test_missing_config(client, ready, monkeypatch, missing):
     if missing == "repo":

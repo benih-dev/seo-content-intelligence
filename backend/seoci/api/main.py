@@ -204,7 +204,7 @@ def run_detail(run_id: str, db=Depends(database)):
 
 @app.post("/api/runs/{run_id}/publish/github")
 def publish_github(run_id: str, db=Depends(database)):
-    run = lock_run(db, run_id)
+    run = get_or_404(db, WorkflowRun, run_id)
     if run.state not in {"article_ready", "exported"}:
         raise HTTPException(409, "Approve the final article before submitting a GitHub PR")
     if run.context.get("github_publish"):
@@ -214,7 +214,13 @@ def publish_github(run_id: str, db=Depends(database)):
     if not draft:
         raise HTTPException(409, "No article draft is available")
     qa = latest(db, QAReview, run.id)
-    result = publish(project, run, draft, qa.data.get("status", "unknown") if qa else "unknown")
+    qa_status = qa.data.get("status", "unknown") if qa else "unknown"
+    db.expunge_all()
+    db.commit()
+    result = publish(project, run, draft, qa_status)
+    run = lock_run(db, run_id)
+    if run.context.get("github_publish"):
+        return run.context["github_publish"]
     run.context = {**run.context, "github_publish": result}
     db.commit()
     return result
