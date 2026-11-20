@@ -55,11 +55,12 @@ def proposed_url(domain, slug):
 
 def available_slug(slug, domain, inventory):
     occupied = {url_key(url) for url in inventory}
-    candidate, suffix = slug, 2
-    while url_key(proposed_url(domain, candidate)) in occupied:
-        candidate = f"{slug}-{suffix}"
-        suffix += 1
-    return candidate
+    base = re.sub(r"[^a-z0-9]+", "-", unquote(urlparse(slug).path).lower()).strip("-") or "article"
+    for index in range(len(occupied) + 1):
+        candidate = base if index == 0 else f"{base}-{index + 1}"
+        if url_key(proposed_url(domain, candidate)) not in occupied:
+            return candidate
+    raise RuntimeError("Could not allocate a unique article slug")
 
 
 def check_article(body, metadata, evidence, inventory, keyword, expert=False, project_domain=None):
