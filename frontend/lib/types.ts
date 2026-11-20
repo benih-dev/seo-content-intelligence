@@ -47,6 +47,10 @@ export interface Keyword extends Version {
   confidence: number;
   data: {
     intent: Intent;
+    final_intent?: string;
+    overlap_warnings?: { url: string; reason: string; recommendation: string }[];
+    inventory_count?: number;
+    inventory_missing_metadata?: number;
     metrics: {
       volume: number | null;
       competition: string | number | null;

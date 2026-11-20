@@ -12,10 +12,19 @@ from seoci.providers.demo_topics import practical_notes
 T = TypeVar("T", bound=BaseModel)
 
 
+SUPPORTED_INTENTS = {"informational", "commercial", "transactional", "navigational", "mixed"}
+
+
 class Intent(BaseModel):
     label: str
     reason: str
     confidence: float = Field(ge=0, le=1)
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value):
+        label = value.strip().lower() if isinstance(value, str) else ""
+        return label if label in SUPPORTED_INTENTS else "mixed"
 
 
 class Strategy(BaseModel):

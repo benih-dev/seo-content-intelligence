@@ -56,7 +56,8 @@ export default function ProjectPage({
     setImportError("");
     setBusy(true);
     setResult(undefined);
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     try {
       const urls = String(form.get("urls") ?? "")
         .split("\n")
@@ -80,6 +81,7 @@ export default function ProjectPage({
         return [...byId.values()];
       });
       setResult(response);
+      if (!sitemap && response.items.length > 0 && !response.failures.length) formElement.reset();
     } catch (e) {
       setImportError((e as Error).message);
     } finally {
@@ -301,7 +303,7 @@ export default function ProjectPage({
                   </div>
                 </div>
               )}
-              <Panel title={`Known content · ${items.length} URLs`}>
+              <Panel title={`Known content · ${items.length} ${items.length === 1 ? "URL" : "URLs"}`}>
                 {!items.length ? (
                   <Empty title="No content imported yet">
                     Add your existing pages to detect overlap and suggest

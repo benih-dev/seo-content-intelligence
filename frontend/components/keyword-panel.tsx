@@ -1,8 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { ArrowUpRight, Check, Info } from "lucide-react";
 import { date, label, percent } from "@/lib/api";
 import type { Run } from "@/lib/types";
+import { clearReviewChoice, readReviewChoice, reviewStorage, saveReviewChoice } from "@/lib/keyword-review";
 import { Badge, Empty, Panel } from "./ui";
 
 export type Command = (
@@ -19,12 +21,21 @@ export function KeywordPanel({
   command: Command;
   busy: boolean;
 }) {
-  const [selected, setSelected] = useState(
-    run.keywords.find((k) => k.selected)?.keyword || run.primary_keyword,
-  );
+  const [choice, setChoice] = useState(() => readReviewChoice(run, reviewStorage()));
+  const selected = choice.keyword;
+  const intent = choice.intent;
+  function updateChoice(keyword: string, intent: string) {
+    const next = { keyword, intent };
+    setChoice(next);
+    saveReviewChoice(run.id, next, reviewStorage());
+  }
+  useEffect(() => {
+    if (run.keywords.some((k) => k.selected) || run.state === "cancelled") {
+      clearReviewChoice(run.id, reviewStorage());
+    }
+  }, [run.id, run.state, run.keywords]);
   const candidate =
     run.keywords.find((k) => k.keyword === selected) || run.keywords[0];
-  const [intent, setIntent] = useState(candidate?.intent || "informational");
   if (!candidate)
     return (
       <Empty title="Research is taking shape">
@@ -37,7 +48,7 @@ export function KeywordPanel({
   );
   const metric = candidate.data.metrics;
   const strategy = run.artifacts.find((x) => x.stage === "strategy");
-  const warnings = (strategy?.data.overlap_warnings || []) as {
+  const warnings = (candidate.data.overlap_warnings || strategy?.data.overlap_warnings || []) as {
     url: string;
     reason: string;
     recommendation: string;
@@ -81,8 +92,7 @@ export function KeywordPanel({
                           checked={selected === k.keyword}
                           disabled={!atGate || busy}
                           onChange={() => {
-                            setSelected(k.keyword);
-                            setIntent(k.intent);
+                            updateChoice(k.keyword, k.intent);
                           }}
                         />
                         {k.keyword}
@@ -139,6 +149,12 @@ export function KeywordPanel({
             </div>
           </div>
           <div className="provenance">
+            <p>
+              Unavailable dimensions excluded: {Object.entries(candidate.data.opportunity.dimensions)
+                .filter(([, d]) => d.score === null)
+                .map(([key, d]) => `${label(key)} (${percent(d.weight)} weight)`)
+                .join(", ") || "none"}. The total is reweighted over available dimensions only.
+            </p>
             <span>
               Provider <b>{metric.provider}</b>
             </span>
@@ -164,7 +180,8 @@ export function KeywordPanel({
           <div className="intent-summary">
             <span className="intent-icon">↗</span>
             <div>
-              <h3>{label(candidate.intent)}</h3>
+              <small>Original inferred assessment</small>
+              <h3>{label(candidate.data.intent.label)}</h3>
               <small>
                 {percent(candidate.data.intent.confidence)} model confidence
               </small>
@@ -176,7 +193,7 @@ export function KeywordPanel({
             <select
               value={intent}
               disabled={!atGate || busy}
-              onChange={(e) => setIntent(e.target.value)}
+              onChange={(e) => updateChoice(candidate.keyword, e.target.value)}
             >
               {[
                 ...new Set([
@@ -232,8 +249,8 @@ export function KeywordPanel({
         </div>
       </Panel>
       <Panel
-        title="Search landscape"
-        eyebrow="SERP SNAPSHOT"
+        title={snapshot?.data.mock ? "Sample search landscape — not real competitors" : "Search landscape"}
+        eyebrow={snapshot?.data.mock ? "MOCK / SAMPLE DATA" : "SERP SNAPSHOT"}
         aside={
           snapshot && (
             <span className="muted">
@@ -248,17 +265,17 @@ export function KeywordPanel({
             <p className="panel-description">
               Results for “{snapshot.query}” in {snapshot.locale}.
               {snapshot.data.mock &&
-                " Offline example results — not live rankings."}
+                " Sample reference links only — not real competitors or live rankings. Titles and positions are illustrative."}
             </p>
             <div className="serp-list">
               {snapshot.data.results.map((result) => (
                 <div className="serp-result" key={result.url}>
                   <span className="rank">
-                    {String(result.rank).padStart(2, "0")}
+                    {snapshot.data.mock ? "Demo" : String(result.rank).padStart(2, "0")}
                   </span>
                   <div>
                     <a href={result.url} target="_blank" rel="noreferrer">
-                      {result.title}
+                      {snapshot.data.mock && "Sample: "}{result.title}
                       <ArrowUpRight size={14} />
                     </a>
                     <small>{result.url}</small>
@@ -273,12 +290,33 @@ export function KeywordPanel({
         )}
       </Panel>
       <Panel title="Site fit & overlap" eyebrow="MAKE SPACE FOR ORIGINAL VALUE">
+        {candidate.data.overlap_warnings !== undefined && (
+          <>
+            {warnings.map((w) => (
+              <div className="notice warning" key={w.url}>
+                <div>
+                  <strong>Potential cannibalization</strong>
+                  <p>{w.reason}</p>
+                  <a href={w.url} target="_blank" rel="noreferrer">{w.url}</a>
+                  <p>Consider updating this article or differentiating the angle.</p>
+                </div>
+              </div>
+            ))}
+            {!candidate.data.inventory_count ? (
+              <p>No site inventory available. Import existing content to check overlap.</p>
+            ) : candidate.data.inventory_missing_metadata ? (
+              <p>Some inventory items lack titles. Overlap checks use available titles, slugs and URL paths and may miss competing content.</p>
+            ) : !warnings.length ? (
+              <p>No matching title, slug or URL path tokens found. This is not a semantic overlap assessment.</p>
+            ) : null}
+          </>
+        )}
         {strategy ? (
           <>
             <h3>{String(strategy.data.angle)}</h3>
             <p className="body-copy">{String(strategy.data.rationale)}</p>
             <p className="body-copy">{String(strategy.data.differentiation)}</p>
-            {warnings.length ? (
+            {candidate.data.overlap_warnings === undefined && (warnings.length ? (
               warnings.map((w) => (
                 <div className="notice warning" key={w.url}>
                   <Info size={18} />
@@ -300,7 +338,7 @@ export function KeywordPanel({
                 <Check size={16} />
                 No overlapping titles or slugs found in the current inventory.
               </div>
-            )}
+            ))}
             {strategy.data.ymyl === true && (
               <div className="notice warning">
                 Expert review required — this topic may affect high-impact
@@ -310,12 +348,23 @@ export function KeywordPanel({
           </>
         ) : (
           <p className="body-copy">
-            Site-fit strategy and overlap warnings are generated after keyword
-            approval, before you approve the brief. Existing content inventory
-            is used to identify potential cannibalization.
+            Site-fit strategy is generated after keyword approval. The overlap
+            assessment above uses the site inventory captured during research.
           </p>
         )}
       </Panel>
+      {(atGate || run.state === "cancelled") && (
+        <div className="notice subtle">
+          <div>
+            <strong>Want a different keyword?</strong>
+            <p>Cancel this run, then start a new run with a different keyword.</p>
+            {atGate && <button className="button secondary" disabled={busy} onClick={() => command("cancel")}>
+              Cancel this run
+            </button>}{" "}
+            <Link href={`/runs/new?project=${run.project_id}`}>Start over with a different keyword</Link>
+          </div>
+        </div>
+      )}
       {atGate && (
         <div className="approval-bar">
           <div>
@@ -328,7 +377,7 @@ export function KeywordPanel({
             onClick={() =>
               command("approve", {
                 stage: "keyword",
-                payload: { keyword: selected, intent },
+                payload: { keyword: candidate.keyword, intent },
               })
             }
           >
