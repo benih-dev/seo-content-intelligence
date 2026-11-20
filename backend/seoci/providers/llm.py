@@ -52,7 +52,13 @@ class Brief(BaseModel):
     differentiation: str = ""
     audience: str = Field(min_length=1)
     intent: str
-    outline: list[dict] = Field(min_length=2)
+    outline: list[dict] = Field(min_length=2,
+        description="Start with exactly one H1 (level 1), then H2/H3 sections without skipping heading levels. Every section needs its editorial purpose.",
+        json_schema_extra={"items": {"type": "object", "properties": {
+            "level": {"type": "integer", "enum": [1, 2, 3]},
+            "heading": {"type": "string", "minLength": 1},
+            "purpose": {"type": "string", "minLength": 1},
+        }, "required": ["level", "heading", "purpose"]}})
     questions: list[str]
     subtopics: list[str] = []
     entities: list[str] = []
