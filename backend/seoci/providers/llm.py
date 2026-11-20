@@ -105,6 +105,13 @@ class MockLLMClient:
                     "internal_links": ctx.get("inventory", []), "source_plan": [k, f"{k} authoritative guidance"]}
         elif task in {"draft", "revise"}:
             data = {"body_md": self.article(ctx, indo), "change_log": "Rebuilt from approved brief; removed unsupported quantitative claims" if task == "revise" else "Initial evidence-led draft"}
+            if task == "revise" and ctx.get("revision_instructions", "").strip():
+                instructions = ctx["revision_instructions"].strip()
+                heading = "Tanggapan atas arahan editor" if indo else "Response to editorial instructions"
+                data["body_md"] += f"\n\n## {heading}\n\n" + "\n".join(f"> {line}" for line in instructions.splitlines())
+                data["body_md"] += ("\n\nDalam demo ini, jadikan arahan tersebut sebagai daftar periksa: bandingkan pilihan dengan kebutuhan pembaca, periksa kesesuaian sumber, lalu tinjau kembali penjelasan sebelum publikasi. Editor tetap perlu memvalidasi perubahan secara langsung.\n" if indo else
+                                    "\n\nIn this demo, use these instructions as a review checklist: compare the options against reader needs, check source suitability, and review the explanation before publication. An editor must still validate the changes directly.\n")
+                data["change_log"] = "Addressed reviewer instructions in an explicit demo review section"
         elif task == "seo":
             desc = (f"Pelajari {k} melalui langkah praktis, perbandingan pilihan, contoh penerapan, dan daftar periksa agar keputusan Anda lebih terarah." if indo else
                     f"Explore {k} with a practical plan, comparison table, worked example and review checklist. Understand the trade-offs before you begin.")

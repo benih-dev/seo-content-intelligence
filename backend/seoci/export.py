@@ -28,7 +28,8 @@ def build_exports(db, run: WorkflowRun):
                "brief": rows(ContentBrief), "evidence_ledger": rows(EvidenceItem), "sources": rows(ResearchSource),
                "qa_report": rows(QAReview), "versions": [row_dict(x) for x in drafts],
                "article": {"id": draft.id, "body_md": draft.body_md, "body_html": render_md(draft.body_md)}}
-    outputs = {"md": draft.body_md, "html": "<!doctype html><html><head><meta charset=\"utf-8\"><title>" + html.escape(draft.metadata_json.get("title", "Article")) + "</title></head><body>" + render_md(draft.body_md) + "</body></html>",
+    language = run.context.get("project", {}).get("language") or run.locale.split("-")[0]
+    outputs = {"md": draft.body_md, "html": '<!doctype html><html lang="' + html.escape(language, quote=True) + '"><head><meta charset="utf-8"><title>' + html.escape(draft.metadata_json.get("title", "Article")) + "</title></head><body>" + render_md(draft.body_md) + "</body></html>",
                "json": json.dumps(package, ensure_ascii=False, indent=2)}
     for fmt, content in outputs.items():
         existing = db.scalar(select(ArtifactFile).where(ArtifactFile.run_id == run.id, ArtifactFile.artifact_type == fmt))

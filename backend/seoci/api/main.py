@@ -219,6 +219,9 @@ def approve(run_id: str, body: ApprovalInput, db=Depends(database)):
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
     if body.stage == "final" and body.decision == "approve":
+        draft = latest(db, ArticleDraft, run_id)
+        if body.payload.get("draft_id") != draft.id or body.payload.get("draft_version") != draft.version:
+            raise HTTPException(409, "The reviewed draft is not the latest draft. Switch to the latest version and review it before approving.")
         qa = latest(db, QAReview, run_id)
         if qa.data.get("expert_review_required") and not (body.payload.get("expert_reviewed") is True and body.comment.strip()):
             raise HTTPException(409, "Expert review required: expert_reviewed=true and reviewer comment required")

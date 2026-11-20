@@ -9,7 +9,7 @@ from seoci.db import Session
 from seoci.export import render_md
 from seoci.models import StageArtifact
 from seoci.pipeline.quality import check_article, opportunity, overlap, ymyl
-from seoci.providers.llm import Intent, LiteLLMClient, MockLLMClient
+from seoci.providers.llm import Draft, Intent, LiteLLMClient, MockLLMClient
 from seoci.providers.network import cached, safe_url
 from seoci.providers.research import untrusted
 from seoci.providers.serp import MockSerp
@@ -33,6 +33,7 @@ def test_full_api_worker_export(client, project):
     package = client.get(f"/api/runs/{run}/export/json").json()
     assert package["versions"][0]["id"] == result["drafts"][0]["id"]
     assert "<table>" in client.get(f"/api/runs/{run}/export/html").text
+    assert '<html lang="id">' in client.get(f"/api/runs/{run}/export/html").text
     states = [x["data"]["to"] for x in result["audit"] if x["action"] == "transition"]
     assert states == ["ready_for_research", "researching", "keyword_review", "strategy", "brief_review", "evidence_research", "drafting", "optimizing", "qa", "final_review", "article_ready", "exported"]
     assert not work_once()
@@ -98,7 +99,12 @@ def test_ymyl_expert_gate(client, project):
     run = to_final(client, project, "dana darurat")
     result = detail(client, run)
     assert result["qa_reviews"][-1]["data"]["expert_review_required"]
-    assert client.post(f"/api/runs/{run}/approve", json={"stage": "final"}).status_code == 409
+    draft = result["drafts"][-1]
+    payload = {"draft_id": draft["id"], "draft_version": draft["version"]}
+    response = client.post(f"/api/runs/{run}/approve", json={"stage": "final", "payload": payload})
+    assert response.status_code == 409
+    assert "Expert review required" in response.json()["detail"]
+    assert client.post(f"/api/runs/{run}/approve", json={"stage": "final", "payload": {**payload, "expert_reviewed": True}, "comment": "   "}).status_code == 409
     result = approve(client, run, "final", payload={"expert_reviewed": True}, comment="Reviewed by project financial editor; sources and limitations accepted")
     assert result["state"] == "exported"
     assert result["qa_reviews"][-1]["data"]["human_resolution"]["expert_reviewed"]
@@ -146,6 +152,64 @@ def test_brief_edits_and_final_revision(client, project):
     result = approve(client, run, "final", decision="request_revision", comment="Make the explanation clearer")
     assert result["state"] == "final_review", result.get("error")
     assert len(result["drafts"]) == 2
+    assert "Make the explanation clearer" in result["drafts"][-1]["body_md"]
+    assert result["drafts"][0]["body_md"] != result["drafts"][-1]["body_md"]
+
+
+def test_final_approval_binds_latest_draft_and_records_comment(client, project):
+    run = to_final(client, project)
+    old = detail(client, run)["drafts"][-1]
+    assert client.put(f"/api/runs/{run}/draft", json={"body_md": old["body_md"] + "\n\nCatatan editor."}).status_code == 202
+    work_once()
+    draft = detail(client, run)["drafts"][-1]
+    for payload in ({}, {"draft_id": old["id"], "draft_version": old["version"]},
+                    {"draft_id": draft["id"], "draft_version": old["version"]},
+                    {"draft_id": "missing", "draft_version": draft["version"]}):
+        response = client.post(f"/api/runs/{run}/approve", json={"stage": "final", "payload": payload})
+        assert response.status_code == 409
+        assert "latest draft" in response.json()["detail"]
+    comment = "Reviewed sources and accepted editorial limitations."
+    result = approve(client, run, "final", comment=comment)
+    assert result["drafts"][-1]["status"] == "approved"
+    approval = result["approvals"][-1]
+    assert approval["comment"] == comment
+    assert approval["data"]["draft_id"] == draft["id"]
+    assert approval["data"]["draft_version"] == draft["version"]
+
+
+def test_revision_prompt_contains_instructions(client, project, monkeypatch):
+    original = MockLLMClient.complete_json
+    prompts = []
+    def capture(self, task, prompt, schema):
+        if task == "revise":
+            prompts.append(json.loads(prompt))
+        return original(self, task, prompt, schema)
+    monkeypatch.setattr(MockLLMClient, "complete_json", capture)
+    run = to_final(client, project)
+    instructions = "Explain how to choose a suitable pot."
+    result = approve(client, run, "final", decision="request_revision", comment=instructions)
+    assert prompts[-1]["revision_instructions"] == instructions
+    assert prompts[-1]["previous_draft"] == result["drafts"][0]["body_md"]
+    assert instructions in result["drafts"][-1]["body_md"]
+    assert result["approvals"][-1]["comment"] == instructions
+
+
+@pytest.mark.parametrize("instructions", ["", "   ", "Explain the trade-offs."])
+def test_mock_revision_instructions_empty_and_normal(instructions):
+    ctx = {"keyword": "gardening", "language": "en", "audience": "beginners", "revision_instructions": instructions,
+           "brief": {"outline": [{"level": 1, "heading": "Gardening"}]}}
+    result = MockLLMClient().complete_json("revise", json.dumps(ctx), Draft)
+    assert ("Response to editorial instructions" in result.body_md) == bool(instructions.strip())
+    if instructions.strip():
+        assert instructions in result.body_md
+
+
+def test_english_html_language_and_empty_approval_comment(client):
+    project = client.post("/api/projects", json={"name": "Garden", "domain": "https://garden.example", "niche": "garden", "audience": "beginners", "language": "en", "country": "US"}).json()
+    run = to_final(client, project, "balcony gardening")
+    result = approve(client, run, "final")
+    assert result["approvals"][-1]["comment"] == ""
+    assert '<html lang="en">' in client.get(f"/api/runs/{run}/export/html").text
 
 
 def test_revision_cap_and_manual_takeover(client, project, monkeypatch):
