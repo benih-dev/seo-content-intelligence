@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Shell } from "@/components/shell";
 import { themeScript } from "@/lib/theme";
+import { textSizeScript } from "@/lib/text-size";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -17,6 +18,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script dangerouslySetInnerHTML={{ __html: textSizeScript }} />
       </head>
       <body>
         <a href="#main" className="skip-link">
