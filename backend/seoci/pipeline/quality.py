@@ -1,5 +1,5 @@
 import re
-from urllib.parse import urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 DIMENSIONS = ["Intent satisfaction", "Accuracy & evidence", "Original value", "Editorial quality",
               "On-page completeness", "Trust & accountability"]
@@ -85,18 +85,39 @@ def ymyl(keyword):
     return bool(re.search(r"\b(financ\w*|invest\w*|health|medic\w*|legal|safety|kesehatan|obat|hukum|keuangan|dana|tabungan|diet|penyakit|emergency fund)\b", keyword.lower()))
 
 
-def check_article(body, metadata, evidence, inventory, keyword, expert=False):
+def url_key(url):
+    parsed = urlparse(url)
+    return parsed.hostname, unquote(parsed.path).rstrip("/") or "/"
+
+
+def proposed_url(domain, slug):
+    return urljoin(domain.rstrip("/") + "/", slug)
+
+
+def available_slug(slug, domain, inventory):
+    occupied = {url_key(url) for url in inventory}
+    candidate, suffix = slug, 2
+    while url_key(proposed_url(domain, candidate)) in occupied:
+        candidate = f"{slug}-{suffix}"
+        suffix += 1
+    return candidate
+
+
+def check_article(body, metadata, evidence, inventory, keyword, expert=False, project_domain=None):
     findings = []
     def add(dim, severity, location, finding, action):
         findings.append(dict(dimension=dim, severity=severity, location=location, finding=finding, action=action))
     source_urls = {x["url"] for x in evidence}
     for i, line in enumerate(body.splitlines(), 1):
-        if line.startswith("- [") and any(url in line for url in source_urls):
-            continue
-        # Ignore table separators, headings, URL-only references and ordered list markers.
-        text = re.sub(r"https?://[^\s)]+", "", re.sub(r"^\d+\.\s", "", line))
+        text = line
+        reference = re.match(r"^\s*[-*+]\s+\[[^\]]+\]\((https?://[^)]+)\)", text)
+        if reference and reference[1] in source_urls:
+            text = text[reference.end():]
+            text = re.sub(r"^\s*[—–-]\s*[^;\d\n]+;\s*(?:retrieved|diakses)\s+\d{4}-\d{2}-\d{2}\s*$", "", text, flags=re.I)
+        text = re.sub(r"https?://[^\s)]+", "", re.sub(r"^\d+\.\s", "", text))
+        text = re.sub(r"^#{1,6}\s+(?:(?:step|langkah|tahap)\s+\d+(?:[:.)-]\s*|\s+|$)|\d+[.)]\s+)", "", text, flags=re.I)
         if re.search(r"\b\d+(?:[.,]\d+)?\s*(?:%|persen|percent|juta|million|days|hari|tahun|years)?", text):
-            supported = any(url in line and str(ev.get("claim", "")) in line for ev in evidence for url in [ev["url"]])
+            supported = any(ev.get("claim") and url in line and str(ev["claim"]) in line for ev in evidence for url in [ev["url"]])
             if not supported:
                 add("Accuracy & evidence", "blocker", f"line:{i}", "Unsupported numeric claim", "Add evidence for this exact claim or remove it")
     previous = 0
@@ -114,9 +135,24 @@ def check_article(body, metadata, evidence, inventory, keyword, expert=False):
     if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", metadata.get("slug", "")):
         add("On-page completeness", "major", "slug", "Invalid slug", "Use lowercase hyphen-separated words")
     known = set(inventory)
+    known_keys = {url_key(url) for url in known}
     hosts = {urlparse(x).hostname for x in known}
-    for url in re.findall(r"\]\((https?://[^)]+)\)", body):
-        if urlparse(url).hostname in hosts and url not in known and url not in source_urls:
+    if project_domain:
+        hosts.add(urlparse(project_domain).hostname)
+    domains = [project_domain] if project_domain else [f"{urlparse(url).scheme}://{urlparse(url).netloc}" for url in known]
+    slug = metadata.get("slug", "")
+    proposed = {url_key(proposed_url(domain, slug)) for domain in domains} if slug else set()
+    if proposed & known_keys:
+        add("On-page completeness", "major", "slug", "Slug collides with existing content", "Choose a unique path or update the existing article")
+    for href in re.findall(r"(?<!!)\[[^\]]*\]\(([^)\s]+)\)", body):
+        if href.startswith("#"):
+            continue
+        url = urljoin(proposed_url(domains[0], slug), href) if domains else href
+        if urlparse(url).scheme not in {"http", "https"}:
+            continue
+        if url_key(url) in proposed:
+            add("On-page completeness", "major", href, "Self-referencing internal link", "Remove this link or choose a different article URL")
+        if urlparse(url).hostname in hosts and url_key(url) not in known_keys:
             add("On-page completeness", "major", url, "Unknown internal link", "Choose an existing inventory URL")
     words = body.split()
     if body.lower().count(keyword.lower()) * max(1, len(keyword.split())) / max(1, len(words)) > .07:

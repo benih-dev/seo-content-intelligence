@@ -12,10 +12,11 @@ from sqlalchemy import select
 from seoci.config import settings
 from seoci.db import Session
 from seoci.export import build_exports, render_md, row_dict
-from seoci.models import (ArticleDraft, AuditEvent, ContentBrief, EvidenceItem, KeywordMetricSnapshot,
-                          KeywordRecord, Project, QAReview, ResearchSource, SERPResult, SERPSnapshot,
-                          SiteContentItem, StageArtifact, WorkflowRun)
-from seoci.pipeline.quality import annotate_internal_links, suggest_internal_links, check_article, opportunity, overlap, ymyl
+from seoci.models import (ApprovalEvent, ArticleDraft, AuditEvent, ContentBrief, EvidenceItem, KeywordMetricSnapshot,
+                          Job, KeywordRecord, Project, QAReview, ResearchSource, SERPResult, SERPSnapshot,
+                          SiteContentItem, StageArtifact, WorkflowRun, now)
+from seoci.pipeline.quality import (annotate_internal_links, available_slug, check_article, opportunity, overlap,
+                                    suggest_internal_links, ymyl)
 from seoci.pipeline.state import transition
 from seoci.providers.keywords import get_keywords
 from seoci.providers.llm import Brief, Draft, Intent, QA, SEO, Strategy, get_llm
@@ -40,7 +41,7 @@ def context(db, run):
     p = run.context.get("project") or row_dict(db.get(Project, run.project_id))
     records = list(db.scalars(select(KeywordRecord).where(KeywordRecord.run_id == run.id, KeywordRecord.selected.is_(True))))
     brief = latest(db, ContentBrief, run.id)
-    return {"keyword": run.primary_keyword, "language": p["language"], "audience": p["audience"],
+    return {"keyword": run.primary_keyword, "language": p["language"], "audience": p["audience"], "domain": p["domain"],
             "niche": p["niche"], "voice_profile": p["voice_profile"], "rules": p["rules"],
             "business_objective": p["business_objective"], "intent": records[0].intent if records else "informational",
             "inventory": [x.url for x in db.scalars(select(SiteContentItem).where(SiteContentItem.project_id == run.project_id))],
@@ -52,14 +53,18 @@ def context(db, run):
 def llm_call(db, run, task, schema, extra=None):
     usages = list(db.scalars(select(AuditEvent).where(AuditEvent.run_id == run.id, AuditEvent.action == "llm_usage")))
     spent = sum(x.data.get("cost_usd", 0) for x in usages)
+    pending = db.info.setdefault("llm_usage", [])
+    spent += sum(data.get("cost_usd", 0) for run_id, data in pending if run_id == run.id)
     if spent >= settings.run_budget_usd:
         raise RuntimeError("Run budget exhausted")
     client = get_llm()
     prompt = json.dumps({**context(db, run), **(extra or {})}, ensure_ascii=False)
     start = time.monotonic()
-    result = client.complete_json(task, prompt, schema)
-    for usage in client.usage:
-        db.add(AuditEvent(run_id=run.id, actor="system", action="llm_usage", data={**usage, "latency_ms": round((time.monotonic()-start)*1000), "prompt_version": "v1"}))
+    try:
+        result = client.complete_json(task, prompt, schema)
+    finally:
+        for usage in client.usage:
+            pending.append((run.id, {**usage, "latency_ms": round((time.monotonic()-start)*1000), "prompt_version": "v1"}))
     return result.model_dump()
 
 
@@ -76,13 +81,21 @@ def stage(name, fn, version_fn=lambda db, run: 1):
             token = active_session.set(db)
             try:
                 data = fn(db, run) or {}
+                row = StageArtifact(run_id=run.id, stage=name, version=version, data=data)
+                db.add(row)
+                db.flush()
+                db.add(AuditEvent(run_id=run.id, actor="system", action="stage_complete", data={"stage": name, "artifact_id": row.id, "version": version, "latency_ms": round((time.monotonic()-start)*1000)}))
+                for job in db.scalars(select(Job).where(Job.run_id == run.id, Job.status == "running")):
+                    job.heartbeat_at = now()
+                db.commit()
             finally:
                 active_session.reset(token)
-            row = StageArtifact(run_id=run.id, stage=name, version=version, data=data)
-            db.add(row)
-            db.flush()
-            db.add(AuditEvent(run_id=run.id, actor="system", action="stage_complete", data={"stage": name, "artifact_id": row.id, "version": version, "latency_ms": round((time.monotonic()-start)*1000)}))
-            db.commit()
+                usages = db.info.pop("llm_usage", [])
+                db.rollback()
+                if usages:
+                    with Session() as usage_db:
+                        usage_db.add_all(AuditEvent(run_id=run_id, actor="system", action="llm_usage", data=data) for run_id, data in usages)
+                        usage_db.commit()
         return {}
     return node
 
@@ -219,7 +232,15 @@ def drafting(db, run):
         transition(db, run, "drafting", reason="Apply bounded revision")
     old = latest(db, ArticleDraft, run.id)
     version = old.version + 1 if old else 1
-    data = llm_call(db, run, "revise" if old else "draft", Draft, {"previous_draft": old.body_md if old else None})
+    feedback = {"previous_draft": old.body_md if old else None}
+    if old:
+        review = latest(db, QAReview, run.id)
+        approval = db.scalar(select(ApprovalEvent).where(ApprovalEvent.run_id == run.id,
+                             ApprovalEvent.stage == "final", ApprovalEvent.decision == "request_revision")
+                             .order_by(ApprovalEvent.created_at.desc()).limit(1))
+        feedback.update(reviewer_comment=approval.comment if approval else None,
+                        qa_findings=review.data.get("findings", []) if review else [])
+    data = llm_call(db, run, "revise" if old else "draft", Draft, feedback)
     row = ArticleDraft(run_id=run.id, version=version, body_md=data["body_md"], body_html=render_md(data["body_md"]), data={"change_log": data["change_log"]})
     db.add(row)
     db.flush()
@@ -230,6 +251,8 @@ def drafting(db, run):
 def optimizing(db, run):
     row = latest(db, ArticleDraft, run.id)
     row.metadata_json = {**llm_call(db, run, "seo", SEO, {"body_md": row.body_md}), "primary_keyword": run.primary_keyword, "locale": run.locale}
+    ctx = context(db, run)
+    row.metadata_json = {**row.metadata_json, "slug": available_slug(row.metadata_json["slug"], ctx["domain"], ctx["inventory"])}
     transition(db, run, "qa", reason="SEO metadata generated", artifact_ref=row.id)
     return row.metadata_json
 
@@ -238,7 +261,7 @@ def qa(db, run):
     row = latest(db, ArticleDraft, run.id)
     ctx = context(db, run)
     evidence = [{**x, "url": x["data"].get("url")} for x in ctx["evidence"]]
-    result = check_article(row.body_md, row.metadata_json, evidence, ctx["inventory"], run.primary_keyword, ymyl(run.primary_keyword))
+    result = check_article(row.body_md, row.metadata_json, evidence, ctx["inventory"], run.primary_keyword, ymyl(run.primary_keyword), project_domain=ctx["domain"])
     review = llm_call(db, run, "qa", QA, {"body_md": row.body_md, "metadata": row.metadata_json})
     result["findings"] += review["findings"]
     result["summary"] = review["summary"]
