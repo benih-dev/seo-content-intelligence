@@ -53,3 +53,5 @@ def test_worker_refreshes_lease_during_execution(client, project, monkeypatch):
         assert claim_job() is None
     monkeypatch.setattr(worker, "execute", execute)
     assert worker.work_once()
+    with Session() as db:
+        assert db.scalar(select(Job.status)) == "done"
