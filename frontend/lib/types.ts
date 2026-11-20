@@ -3,7 +3,7 @@ export interface ProjectInput {
     github_repo?: string;
     base_branch?: string;
     content_dir?: string;
-    file_extension?: "md" | "mdx";
+    file_extension?: "md";
   };
   name: string;
   domain: string;

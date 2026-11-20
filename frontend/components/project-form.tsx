@@ -142,13 +142,7 @@ export function ProjectForm({ project }: { project?: Project }) {
           ))}
           <label>
             File extension
-            <select value={form.publishing?.file_extension ?? "md"}
-              onChange={(e) => setForm({ ...form, publishing: {
-                ...form.publishing, file_extension: e.target.value as "md" | "mdx",
-              } })}>
-              <option value="md">md</option>
-              <option value="mdx">mdx</option>
-            </select>
+            <input value="md" readOnly />
           </label>
           <small>Creates a PR for review only. Never merges or publishes automatically.</small>
         </fieldset>

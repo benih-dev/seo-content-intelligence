@@ -157,7 +157,7 @@ def test_empty_metadata():
 
 @pytest.mark.parametrize("publishing", [{"github_repo": "bad"}, {"content_dir": "../blog"},
                                        {"content_dir": "/blog"}, {"content_dir": "a/../b"},
-                                       {"file_extension": "html"}])
+                                       {"file_extension": "html"}, {"file_extension": "mdx"}])
 def test_invalid_project_publishing(client, project, publishing):
     response = client.put(f"/api/projects/{project['id']}", json={**project, "publishing": publishing})
     assert response.status_code == 422

@@ -9,7 +9,7 @@ class PublishingConfig(BaseModel):
     github_repo: str = ""
     base_branch: str = Field(default="main", min_length=1)
     content_dir: str = "src/content/blog"
-    file_extension: Literal["md", "mdx"] = "md"
+    file_extension: Literal["md"] = "md"
 
     @field_validator("github_repo")
     @classmethod

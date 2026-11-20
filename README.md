@@ -164,7 +164,8 @@ repository with **Contents: read/write** and **Pull requests: read/write** permi
 The token stays on the server and is never returned to the frontend.
 In the project profile, configure `publishing.github_repo` (`owner/name`),
 `base_branch` (default `main`), `content_dir` (default `src/content/blog`), and
-`file_extension` (`md` or `mdx`, default `md`). Existing projects must apply
+`file_extension` (`md` only). Raw Markdown is not published as MDX because Markdown
+autolinks and other syntax can break MDX builds. Existing projects must apply
 `cd backend && uv run alembic upgrade head` before using publishing settings.
 
 After approving the final article and generating exports, click **Kirim PR ke GitHub**.
