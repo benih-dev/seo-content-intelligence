@@ -50,13 +50,15 @@ def check_article(body, metadata, evidence, inventory, keyword, expert=False):
         findings.append(dict(dimension=dim, severity=severity, location=location, finding=finding, action=action))
     source_urls = {x["url"] for x in evidence}
     for i, line in enumerate(body.splitlines(), 1):
-        if line.startswith("- [") and any(url in line for url in source_urls):
-            continue
-        # Ignore table separators, headings, URL-only references and ordered list markers.
-        text = re.sub(r"https?://[^\s)]+", "", re.sub(r"^\d+\.\s", "", line))
+        text = line
+        reference = re.match(r"^\s*[-*+]\s+\[[^\]]+\]\((https?://[^)]+)\)", text)
+        if reference and reference[1] in source_urls:
+            text = text[reference.end():]
+            text = re.sub(r"^\s*[—–-]\s*[^;\n]+;\s*(?:retrieved|diakses)\s+\d{4}-\d{2}-\d{2}\s*$", "", text, flags=re.I)
+        text = re.sub(r"https?://[^\s)]+", "", re.sub(r"^\d+\.\s", "", text))
         text = re.sub(r"^#{1,6}\s+(?:(?:step|langkah|tahap)\s+\d+\s*[:.)-]?|\d+[.)])\s*", "", text, flags=re.I)
         if re.search(r"\b\d+(?:[.,]\d+)?\s*(?:%|persen|percent|juta|million|days|hari|tahun|years)?", text):
-            supported = any(url in line and str(ev.get("claim", "")) in line for ev in evidence for url in [ev["url"]])
+            supported = any(ev.get("claim") and url in line and str(ev["claim"]) in line for ev in evidence for url in [ev["url"]])
             if not supported:
                 add("Accuracy & evidence", "blocker", f"line:{i}", "Unsupported numeric claim", "Add evidence for this exact claim or remove it")
     previous = 0
