@@ -54,6 +54,7 @@ class WorkflowRun(Identity, Base):
     request_fingerprint: Mapped[str] = mapped_column(default="")
     context: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[str | None] = mapped_column(Text)
+    error_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     resume_state: Mapped[str | None]
     revision_count: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[str] = mapped_column(default=now)
@@ -185,6 +186,7 @@ class Job(Identity, Base):
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text)
+    error_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[str] = mapped_column(default=now)
     started_at: Mapped[str | None]
     heartbeat_at: Mapped[str | None]
@@ -195,3 +197,11 @@ class ResponseCache(Identity, Base):
     key: Mapped[str] = mapped_column(unique=True)
     data: Mapped[dict] = mapped_column(JSON)
     expires_at: Mapped[float]
+
+
+class DiagnosticEvent(Identity, Base):
+    __tablename__ = "diagnostic_events"
+    created_at: Mapped[str] = mapped_column(default=now, index=True)
+    level: Mapped[str] = mapped_column(index=True)
+    run_id: Mapped[str | None] = mapped_column(nullable=True, index=True)
+    data: Mapped[dict] = mapped_column(JSON)

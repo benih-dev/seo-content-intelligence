@@ -13,11 +13,13 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from seoci.config import settings
+from seoci.diagnostics import observed
 from seoci.app_settings import resolve_settings
 from seoci.db import Session
 from seoci.models import ResponseCache
 
 active_session = ContextVar("provider_session", default=None)
+cache_bypassed = ContextVar("provider_cache_bypassed", default=False)
 
 
 def safe_url(url):
@@ -41,6 +43,8 @@ def request(method, url, *, allow_redirect_response=False, **kwargs):
 
 
 def cached(provider, query, locale, device, fetch):
+    if cache_bypassed.get():
+        return fetch()
     key = hashlib.sha256(json.dumps([provider, query, locale, device], sort_keys=True).encode()).hexdigest()
     def resolve(db):
         row = db.scalar(select(ResponseCache).where(ResponseCache.key == key))
@@ -62,29 +66,25 @@ def cached(provider, query, locale, device, fetch):
         return data
 
 
+@observed("DataForSEO", endpoint="https://api.dataforseo.com")
 def dfs(endpoint, payload):
     config = resolve_settings().values
-    try:
-        data = request("POST", "https://api.dataforseo.com/v3/" + endpoint,
-                       auth=(config["dataforseo_login"], config["dataforseo_password"]), json=[payload]).json()
-    except Exception:
-        raise RuntimeError("DataForSEO request failed; check provider settings") from None
+    data = request("POST", "https://api.dataforseo.com/v3/" + endpoint,
+                   auth=(config["dataforseo_login"], config["dataforseo_password"]), json=[payload]).json()
     tasks = data.get("tasks") or []
     if not tasks or tasks[0].get("status_code") != 20000:
         raise RuntimeError("DataForSEO task failed; check provider settings and account status")
     return tasks[0].get("result") or []
 
 
+@observed("DataForSEO", endpoint="https://api.dataforseo.com")
 def dfs_location(country, family="serp/google"):
     if len(country) != 2:
         return {"location_name": country}
     def fetch():
         config = resolve_settings().values
-        try:
-            data = request("GET", f"https://api.dataforseo.com/v3/{family}/locations/{country.lower()}",
-                           auth=(config["dataforseo_login"], config["dataforseo_password"])).json()
-        except Exception:
-            raise RuntimeError("DataForSEO location request failed; check provider settings") from None
+        data = request("GET", f"https://api.dataforseo.com/v3/{family}/locations/{country.lower()}",
+                       auth=(config["dataforseo_login"], config["dataforseo_password"])).json()
         tasks = data.get("tasks") or []
         if not tasks or tasks[0].get("status_code") != 20000:
             raise RuntimeError("DataForSEO location lookup failed")

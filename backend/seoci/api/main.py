@@ -1,12 +1,14 @@
 import difflib
 import hashlib
+import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
 
 from seoci.api.schemas import (ApprovalInput, DraftInput, InventoryInput, ProjectInput, RunInput,
@@ -15,10 +17,12 @@ from seoci.config import settings
 from seoci.app_settings import resolve_settings
 from seoci.api.settings import router as settings_router
 from seoci.api.auth import router as auth_router
+from seoci.api.diagnostics import router as diagnostics_router
 from seoci import auth
 from seoci.db import Session, init_db
+from seoci.diagnostics import protect_logging
 from seoci.export import render_md, row_dict, with_article_h1
-from seoci.models import (ApprovalEvent, ArticleDraft, ArtifactFile, AuditEvent, ContentBrief, EvidenceItem,
+from seoci.models import (ApprovalEvent, ArticleDraft, ArtifactFile, AuditEvent, ContentBrief, DiagnosticEvent, EvidenceItem,
                           Job, KeywordRecord, Project, QAReview, ResearchSource, SERPSnapshot,
                           SiteContentItem, StageArtifact, WorkflowRun, now)
 from seoci.pipeline.graph import latest
@@ -30,13 +34,16 @@ from seoci.publish_github import publish
 
 @asynccontextmanager
 async def lifespan(app):
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
     init_db()
+    protect_logging(resolve_settings().values)
     yield
 
 
 app = FastAPI(title="SEO Content Intelligence", version="0.1.0", lifespan=lifespan)
 app.include_router(settings_router)
 app.include_router(auth_router)
+app.include_router(diagnostics_router)
 
 
 @app.middleware("http")
@@ -133,6 +140,7 @@ def delete_project(project_id: str, db=Depends(database)):
     runs = list(db.scalars(select(WorkflowRun.id).where(WorkflowRun.project_id == project_id)))
     if runs and db.scalar(select(Job.id).where(Job.run_id.in_(runs), Job.status.in_(["pending", "running"]))):
         raise HTTPException(409, "Cannot delete a project with active jobs")
+    db.execute(delete(DiagnosticEvent).where(DiagnosticEvent.run_id.in_(runs)))
     db.delete(row)
     db.commit()
 
@@ -346,6 +354,7 @@ def retry_run(run_id: str, db=Depends(database)):
     transition(db, run, "resumed", actor="user", reason="Retry requested")
     transition(db, run, run.resume_state, reason="Restore last valid stage")
     run.error = None
+    run.error_details = None
     job = enqueue(db, run, failed.payload if failed else {})
     db.commit()
     return {"run_id": run_id, "job_id": job.id, "state": run.state}

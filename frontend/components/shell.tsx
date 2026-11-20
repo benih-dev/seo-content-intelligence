@@ -17,6 +17,7 @@ import {
   PanelLeft,
   Plus,
   ShieldCheck,
+  ScrollText,
   Settings,
   Sparkles,
 } from "lucide-react";
@@ -108,6 +109,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <Link href="/settings" className={path === "/settings" ? "nav-link active" : "nav-link"}>
             <Settings size={17} /> Settings
           </Link>
+          <Link href="/logs" className={path === "/logs" ? "nav-link active" : "nav-link"}>
+            <ScrollText size={17} /> Logs
+          </Link>
         </nav>
         <Link className="sidebar-create" href="/projects/new">
           <Plus size={16} /> Create a project
@@ -145,7 +149,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <PanelLeft size={16} />
             Workspace <span>/</span>{" "}
             <strong>
-              {path.startsWith("/runs/") ? "Content workbench" : path === "/settings" ? "Settings" : "Projects"}
+              {path.startsWith("/runs/") ? "Content workbench" : path === "/settings" ? "Settings" : path === "/logs" ? "Logs" : "Projects"}
             </strong>
           </span>
           <div className="topbar-actions">

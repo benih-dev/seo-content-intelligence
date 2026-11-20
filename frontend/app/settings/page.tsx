@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { AppSettings, PublicSetting, SecretSetting, secretStatus, settingsPatch } from "@/lib/settings";
 import { ErrorNotice, Loading, Panel, SectionTitle } from "@/components/ui";
+import { ConnectionTest } from "@/components/connection-test";
 
 export default function SettingsPage() {
   const [saved, setSaved] = useState<AppSettings>();
@@ -85,6 +86,7 @@ export default function SettingsPage() {
               {publicInput("llm_model", "Model", "Leave empty for mock mode. For OpenAI-compatible endpoints use openai/<model>.")}
               {publicInput("llm_api_base", "API base URL", "Optional HTTP(S) endpoint, e.g. http://host:8080/v1. Empty uses the provider default.")}
               {secretInput("llm_api_key", "LLM API key")}
+              <ConnectionTest kind="llm" />
             </div>
           </Panel>
           <Panel title="Search providers" eyebrow="KEYWORDS & SERP">
@@ -101,6 +103,8 @@ export default function SettingsPage() {
               {secretInput("serper_api_key", "Serper API key")}
               {publicInput("dataforseo_login", "DataForSEO login", "Account login for live keyword and SERP requests.")}
               {secretInput("dataforseo_password", "DataForSEO password")}
+              <ConnectionTest kind="serp" />
+              <ConnectionTest kind="keyword" />
             </div>
           </Panel>
           <Panel title="Google Search Console" eyebrow="OWN-SITE KEYWORD DATA">
