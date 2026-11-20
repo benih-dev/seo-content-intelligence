@@ -1,7 +1,6 @@
 import difflib
 import hashlib
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,11 +13,11 @@ from seoci.db import Session, init_db
 from seoci.export import render_md, row_dict
 from seoci.models import (ApprovalEvent, ArticleDraft, ArtifactFile, AuditEvent, ContentBrief, EvidenceItem,
                           Job, KeywordRecord, Project, QAReview, ResearchSource, SERPSnapshot,
-                          SiteContentItem, StageArtifact, WorkflowRun)
+                          SiteContentItem, StageArtifact, WorkflowRun, now)
 from seoci.pipeline.graph import latest
 from seoci.pipeline.state import transition
 from seoci.providers.llm import Brief
-from seoci.providers.sitemap import import_sitemap
+from seoci.providers.sitemap import import_sitemap, project_url
 
 
 @asynccontextmanager
@@ -118,23 +117,31 @@ def content_items(project_id: str, db=Depends(database)):
 @app.post("/api/projects/{project_id}/content-items")
 def add_items(project_id: str, body: InventoryInput, db=Depends(database)):
     p = get_or_404(db, Project, project_id)
-    items, failures = [], []
+    items, failures = {}, []
     for item in body.items:
-        parsed = urlparse(item.url)
-        if parsed.scheme not in {"http", "https"} or parsed.hostname != urlparse(p.domain).hostname:
-            failures.append({"url": item.url, "error": "URL must belong to project domain"})
+        url = item.url.strip()
+        try:
+            parsed = project_url(url, p.domain)
+        except ValueError as exc:
+            failures.append({"url": url, "error": str(exc)})
             continue
-        row = db.scalar(select(SiteContentItem).where(SiteContentItem.project_id == project_id, SiteContentItem.url == item.url))
+        row = db.scalar(select(SiteContentItem).where(SiteContentItem.project_id == project_id, SiteContentItem.url == url))
         if not row:
-            row = SiteContentItem(project_id=project_id, **{**item.model_dump(), "slug": item.slug or parsed.path.strip("/")})
+            row = SiteContentItem(project_id=project_id, **{
+                **item.model_dump(), "url": url, "slug": item.slug or parsed.path.strip("/"),
+            })
             db.add(row)
         else:
-            for key, value in item.model_dump().items():
+            changes = item.model_dump(exclude_unset=True, exclude={"url", "metadata_json"})
+            for key, value in changes.items():
                 setattr(row, key, value)
+            if item.metadata_json:
+                row.metadata_json = {**row.metadata_json, **item.metadata_json}
+            row.last_seen_at = now()
         db.flush()
-        items.append(row_dict(row))
+        items[url] = row_dict(row)
     db.commit()
-    return {"items": items, "failures": failures}
+    return {"items": list(items.values()), "failures": failures}
 
 
 @app.post("/api/projects/{project_id}/sitemap", status_code=202)
@@ -170,6 +177,7 @@ def create_run(body: RunInput, idempotency_key: str | None = Header(default=None
     if "-" not in locale or len(locale.split("-")) != 2:
         raise HTTPException(422, "locale must be language-COUNTRY")
     row = WorkflowRun(project_id=body.project_id, mode=body.mode, primary_keyword=body.primary_keyword,
+                      context={"project": row_dict(project), "project_version": project.version},
                       locale=locale, idempotency_key=idempotency_key, request_fingerprint=fingerprint)
     db.add(row)
     try:

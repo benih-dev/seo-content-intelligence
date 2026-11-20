@@ -21,6 +21,7 @@ export interface ContentItem {
   slug: string;
   status: string;
   last_seen_at: string;
+  metadata_json: { sitemap_lastmod?: string };
 }
 export interface Version {
   id: string;

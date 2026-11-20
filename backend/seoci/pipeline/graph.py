@@ -100,8 +100,9 @@ def stage(name, fn, version_fn=lambda db, run: 1):
 
 
 def load_context(db, run):
-    project = db.get(Project, run.project_id)
-    run.context = {"project": row_dict(project), "project_version": project.version}
+    if not run.context.get("project"):
+        project = db.get(Project, run.project_id)
+        run.context = {"project": row_dict(project), "project_version": project.version}
     transition(db, run, "researching", reason="Context loaded")
     return run.context
 
