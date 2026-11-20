@@ -1,7 +1,8 @@
 import hashlib
 import json
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
@@ -21,7 +22,7 @@ class SearchConsoleKeywords:
         raw = config["gsc_service_account_json"]
         if not site or not raw:
             raise RuntimeError("Search Console requires a site URL and service-account JSON")
-        end = date.today() - timedelta(days=1)
+        end = datetime.now(ZoneInfo("America/Los_Angeles")).date() - timedelta(days=1)
         start = end - timedelta(days=89)
         period = f"{start.isoformat()} to {end.isoformat()}"
 

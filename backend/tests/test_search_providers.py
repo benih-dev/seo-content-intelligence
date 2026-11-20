@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import Mock
 from urllib.parse import quote
 
@@ -126,6 +126,36 @@ def test_gsc_empty_and_error_paths(client, monkeypatch, caplog):
     with pytest.raises(RuntimeError, match="Search Console request failed") as error:
         provider.metrics(["different"], "en-US")
     assert "dummy-private" not in str(error.value) + caplog.text
+
+
+@pytest.mark.parametrize("instant,end", [
+    ("2026-01-15T01:00:00+00:00", "2026-01-13"),
+    ("2026-07-15T01:00:00+00:00", "2026-07-13"),
+    ("2026-07-15T08:00:00+00:00", "2026-07-14"),
+])
+def test_gsc_window_ends_yesterday_in_pacific_time(client, monkeypatch, instant, end):
+    configure_gsc(client, monkeypatch)
+    frozen = datetime.fromisoformat(instant)
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            assert str(tz) == "America/Los_Angeles"
+            return frozen.astimezone(tz)
+
+    monkeypatch.setattr(gsc, "datetime", FrozenDatetime)
+    payloads = []
+
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={})
+
+    mock_http(monkeypatch, handler)
+    result = gsc.SearchConsoleKeywords().rows()
+    assert payloads[0]["endDate"] == end
+    start = date.fromisoformat(payloads[0]["startDate"])
+    assert (date.fromisoformat(end) - start).days == 89
+    assert result["period"] == f"{start.isoformat()} to {end}"
 
 
 def test_impressions_score_without_volume():
