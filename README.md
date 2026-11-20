@@ -248,6 +248,7 @@ Sumber: [`backend/seoci/config.py`](backend/seoci/config.py),
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///./data/seoci.db` | Database SQLAlchemy dan dasar lokasi checkpoint; Compose memakai PostgreSQL. |
 | `LLM_MODEL` | kosong | Kosong memilih mock; isi identifier LiteLLM seperti `openai/gpt-4o-mini` untuk model nyata. |
+| `LLM_API_BASE` | kosong | Opsional: base URL endpoint LLM yang diteruskan sebagai `api_base` ke LiteLLM. Kosong mempertahankan endpoint bawaan provider; Compose meneruskannya ke API dan worker. |
 | `OPENAI_API_KEY` | tidak disetel aplikasi | Kunci OpenAI, dibaca LiteLLM; Compose meneruskan nilai atau string kosong. |
 | `ANTHROPIC_API_KEY` | tidak disetel aplikasi | Kunci Anthropic bila identifier LiteLLM memakai provider itu; Compose juga meneruskannya. |
 | `SERP_PROVIDER` | `mock` | `mock` atau `dataforseo`; mengendalikan SERP, keyword dan penemuan sumber riset. |
@@ -276,6 +277,21 @@ Mode campuran didukung, tetapi LLM nyata dengan SERP mock tetap menerima sumber
 demo. Untuk provider LiteLLM lain, ikuti variabel kredensial provider tersebut dan
 teruskan secara eksplisit ke proses/container. Tabel di atas mencakup integrasi
 yang dipetakan repo, bukan seluruh katalog LiteLLM.
+
+Untuk endpoint OpenAI-compatible, contoh environment proses API dan worker:
+
+```sh
+export LLM_MODEL=openai/custom-model
+export LLM_API_BASE=http://host:8080/v1
+export OPENAI_API_KEY=your-endpoint-key
+```
+
+Ganti `custom-model`, host, port dan kunci sesuai endpoint Anda. Kredensial tetap
+memakai environment provider (`OPENAI_API_KEY` untuk prefix `openai/`), yang dibaca
+LiteLLM juga saat memakai base URL khusus; tidak ada setting `LLM_API_KEY`.
+Untuk Compose, simpan nilai tersebut di `.env` root atau environment host;
+alamat endpoint harus dapat dijangkau dari container API dan worker (bukan
+`localhost` host). Mengisi `LLM_API_BASE` tanpa `LLM_MODEL` tetap memilih mock.
 
 Mock membuat artikel Indonesia/Inggris, contoh hipotetis dan referensi awal
 berlabel demo, bukan riset web terverifikasi. Revisi mock mempertahankan teks lama

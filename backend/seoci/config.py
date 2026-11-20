@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     database_url: str = "sqlite:///./data/seoci.db"
     llm_model: str = ""
+    llm_api_base: str = ""
     serp_provider: Literal["mock", "dataforseo"] = "mock"
     dataforseo_login: str = ""
     dataforseo_password: str = ""
