@@ -15,7 +15,7 @@ from seoci.export import build_exports, render_md, row_dict
 from seoci.models import (ApprovalEvent, ArticleDraft, AuditEvent, ContentBrief, EvidenceItem, KeywordMetricSnapshot,
                           Job, KeywordRecord, Project, QAReview, ResearchSource, SERPResult, SERPSnapshot,
                           SiteContentItem, StageArtifact, WorkflowRun, now)
-from seoci.pipeline.quality import check_article, opportunity, overlap, ymyl
+from seoci.pipeline.quality import available_slug, check_article, opportunity, overlap, ymyl
 from seoci.pipeline.state import transition
 from seoci.providers.keywords import get_keywords
 from seoci.providers.llm import Brief, Draft, Intent, QA, SEO, Strategy, get_llm
@@ -233,6 +233,8 @@ def drafting(db, run):
 def optimizing(db, run):
     row = latest(db, ArticleDraft, run.id)
     row.metadata_json = {**llm_call(db, run, "seo", SEO, {"body_md": row.body_md}), "primary_keyword": run.primary_keyword, "locale": run.locale}
+    ctx = context(db, run)
+    row.metadata_json = {**row.metadata_json, "slug": available_slug(row.metadata_json["slug"], ctx["domain"], ctx["inventory"])}
     transition(db, run, "qa", reason="SEO metadata generated", artifact_ref=row.id)
     return row.metadata_json
 

@@ -1,5 +1,5 @@
 import re
-from urllib.parse import urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 DIMENSIONS = ["Intent satisfaction", "Accuracy & evidence", "Original value", "Editorial quality",
               "On-page completeness", "Trust & accountability"]
@@ -44,6 +44,24 @@ def ymyl(keyword):
     return bool(re.search(r"\b(financ\w*|invest\w*|health|medic\w*|legal|safety|kesehatan|obat|hukum|keuangan|dana|tabungan|diet|penyakit|emergency fund)\b", keyword.lower()))
 
 
+def url_key(url):
+    parsed = urlparse(url)
+    return parsed.hostname, unquote(parsed.path).rstrip("/") or "/"
+
+
+def proposed_url(domain, slug):
+    return urljoin(domain.rstrip("/") + "/", slug)
+
+
+def available_slug(slug, domain, inventory):
+    occupied = {url_key(url) for url in inventory}
+    candidate, suffix = slug, 2
+    while url_key(proposed_url(domain, candidate)) in occupied:
+        candidate = f"{slug}-{suffix}"
+        suffix += 1
+    return candidate
+
+
 def check_article(body, metadata, evidence, inventory, keyword, expert=False, project_domain=None):
     findings = []
     def add(dim, severity, location, finding, action):
@@ -76,11 +94,24 @@ def check_article(body, metadata, evidence, inventory, keyword, expert=False, pr
     if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", metadata.get("slug", "")):
         add("On-page completeness", "major", "slug", "Invalid slug", "Use lowercase hyphen-separated words")
     known = set(inventory)
+    known_keys = {url_key(url) for url in known}
     hosts = {urlparse(x).hostname for x in known}
     if project_domain:
         hosts.add(urlparse(project_domain).hostname)
-    for url in re.findall(r"\]\((https?://[^)]+)\)", body):
-        if urlparse(url).hostname in hosts and url not in known:
+    domains = [project_domain] if project_domain else [f"{urlparse(url).scheme}://{urlparse(url).netloc}" for url in known]
+    slug = metadata.get("slug", "")
+    proposed = {url_key(proposed_url(domain, slug)) for domain in domains} if slug else set()
+    if proposed & known_keys:
+        add("On-page completeness", "major", "slug", "Slug collides with existing content", "Choose a unique path or update the existing article")
+    for href in re.findall(r"(?<!!)\[[^\]]*\]\(([^)\s]+)\)", body):
+        if href.startswith("#"):
+            continue
+        url = urljoin(proposed_url(domains[0], slug), href) if domains else href
+        if urlparse(url).scheme not in {"http", "https"}:
+            continue
+        if url_key(url) in proposed:
+            add("On-page completeness", "major", href, "Self-referencing internal link", "Remove this link or choose a different article URL")
+        if urlparse(url).hostname in hosts and url_key(url) not in known_keys:
             add("On-page completeness", "major", url, "Unknown internal link", "Choose an existing inventory URL")
     words = body.split()
     if body.lower().count(keyword.lower()) * max(1, len(keyword.split())) / max(1, len(words)) > .07:
