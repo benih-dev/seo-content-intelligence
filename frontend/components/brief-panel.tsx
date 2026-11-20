@@ -175,9 +175,14 @@ export function BriefPanel({
       ))}
       <form
         className="panel-stack"
+        noValidate
         onSubmit={(e) => {
           e.preventDefault();
-          const found = outlineIssues(form.outline);
+          const found = [
+            ...(form.angle.trim() ? [] : ["Add an article angle."]),
+            ...(form.audience.trim() ? [] : ["Add the audience."]),
+            ...outlineIssues(form.outline),
+          ];
           setIssues(found);
           if (!found.length)
             command("approve", { stage: "brief", payload: { edits: form } });
