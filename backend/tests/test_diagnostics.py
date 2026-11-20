@@ -214,6 +214,24 @@ def test_wrapped_litellm_connection_error():
     assert "127.0.0.1" in result["message"]
 
 
+@pytest.mark.parametrize("message,category", [
+    ("API key is missing", "auth"),
+    ("api_key must be supplied to the Fireworks client", "auth"),
+    ("Invalid API key", "auth"),
+    ("Unauthorized: credentials were not supplied", "auth"),
+    ("Connection refused", "unreachable"),
+    ("DNS resolution failed", "unreachable"),
+    ("Connection error while sending api_key", "unreachable"),
+])
+def test_wrapped_local_credentials_error(message, category):
+    exc = litellm.APIConnectionError(message=message, model="fireworks_ai/custom", llm_provider="fireworks_ai")
+    result = classify(exc, "LLM", "fireworks_ai/custom", "https://api.fireworks.ai/v1", {})
+    assert result["category"] == category
+    assert result["status"] is None
+    if category == "auth":
+        assert "Settings" in result["hint"]
+
+
 def test_redacting_filter_preserves_access_log_arguments():
     from uvicorn.logging import AccessFormatter
     record = logging.LogRecord("uvicorn.access", logging.INFO, "test", 1, '%s - "%s %s HTTP/%s" %d',

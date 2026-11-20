@@ -108,7 +108,11 @@ def classify(exc, provider="pipeline", model="", endpoint="", config=None):
     elif isinstance(exc, (httpx.TimeoutException, TimeoutError)) or "timeout" in kind:
         category = "timeout"
     elif isinstance(exc, (httpx.ConnectError, ConnectionError)) or any(x in kind for x in ("connection", "transport", "dns")):
-        category = "unreachable"
+        credentials_error = any(x in raw for x in ("api key", "api_key", "unauthorized"))
+        network_error = any(x in raw for x in ("connection error", "connection refused", "dns", "name or service not known", "failed to establish", "network is unreachable"))
+        category = "auth" if kind == "apiconnectionerror" and credentials_error and not network_error else "unreachable"
+        if status == 500:
+            status = None
     elif status in (401, 403) or any(x in kind for x in ("authentication", "permissiondenied", "refresherror", "malformederror")):
         category = "auth"
     elif status == 404 or "notfound" in kind:
