@@ -1,4 +1,10 @@
 export interface ProjectInput {
+  publishing?: {
+    github_repo?: string;
+    base_branch?: string;
+    content_dir?: string;
+    file_extension?: "md" | "mdx";
+  };
   name: string;
   domain: string;
   niche: string;
@@ -154,6 +160,7 @@ export interface RunSummary {
   error: string | null;
 }
 export interface Run extends RunSummary {
+  github_publish?: GitHubPublish | null;
   context: { project?: Project };
   artifacts: (Version & { stage: string; data: Record<string, unknown> })[];
   keywords: Keyword[];
@@ -188,4 +195,10 @@ export interface Run extends RunSummary {
       latency_ms: number;
     }[];
   };
+}
+export interface GitHubPublish {
+  pr_url: string;
+  pr_number: number;
+  branch: string;
+  path: string;
 }

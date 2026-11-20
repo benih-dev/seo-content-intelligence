@@ -1,7 +1,29 @@
+import re
 from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
+
+
+class PublishingConfig(BaseModel):
+    github_repo: str = ""
+    base_branch: str = Field(default="main", min_length=1)
+    content_dir: str = "src/content/blog"
+    file_extension: Literal["md", "mdx"] = "md"
+
+    @field_validator("github_repo")
+    @classmethod
+    def repo_valid(cls, value):
+        if value and not re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+", value):
+            raise ValueError("github_repo must be owner/name")
+        return value
+
+    @field_validator("content_dir")
+    @classmethod
+    def directory_valid(cls, value):
+        if not value or value.startswith("/") or "\\" in value or any(part in {"", ".", ".."} for part in value.split("/")) or ":" in value:
+            raise ValueError("content_dir must be a relative path without '..'")
+        return value
 
 
 class ProjectInput(BaseModel):
@@ -13,6 +35,7 @@ class ProjectInput(BaseModel):
     country: str = "ID"
     voice_profile: str = "clear, practical, helpful"
     rules: dict = Field(default_factory=dict)
+    publishing: PublishingConfig = Field(default_factory=PublishingConfig)
     business_objective: str = "Educate readers"
 
     @field_validator("domain")

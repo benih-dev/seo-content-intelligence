@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 3600
     network_timeout: float = 20
     worker_poll_seconds: float = 0.5
+    github_token: str = ""
+    github_api_url: str = "https://api.github.com"
 
 
 settings = Settings()

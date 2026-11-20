@@ -157,6 +157,24 @@ The acceptance suite is offline: missing metrics, provider timeout/empty respons
 override, overlap, unsupported numeric claims, YMYL, idempotency, export formatting, manual versions,
 revision caps, provider normalization, partial sitemap failures, migrations and complete API/worker E2E.
 
+## GitHub pull requests for Astro blogs
+
+Set `GITHUB_TOKEN` on the backend to a fine-grained GitHub token scoped to the blog
+repository with **Contents: read/write** and **Pull requests: read/write** permissions.
+The token stays on the server and is never returned to the frontend.
+In the project profile, configure `publishing.github_repo` (`owner/name`),
+`base_branch` (default `main`), `content_dir` (default `src/content/blog`), and
+`file_extension` (`md` or `mdx`, default `md`). Existing projects must apply
+`cd backend && uv run alembic upgrade head` before using publishing settings.
+
+After approving the final article and generating exports, click **Kirim PR ke GitHub**.
+This creates an Astro-compatible article with YAML frontmatter on a separate
+`seoci/` branch and opens a PR for human review. It never pushes to the base branch,
+merges, or auto-publishes. Existing files on the base branch are rejected rather
+than overwritten. Repeating a successful request returns the saved PR link.
+If GitHub fails after creating a branch, inspect that branch/PR before retrying;
+an existing branch is reported as a GitHub validation error, not overwritten.
+
 ## PRD mapping
 
 | PRD / requirements | Implementation |
