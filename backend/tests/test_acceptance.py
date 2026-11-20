@@ -152,7 +152,7 @@ def test_brief_edits_and_final_revision(client, project):
     result = approve(client, run, "final", decision="request_revision", comment="Make the explanation clearer")
     assert result["state"] == "final_review", result.get("error")
     assert len(result["drafts"]) == 2
-    assert "Make the explanation clearer" in result["drafts"][-1]["body_md"]
+    assert "Tanggapan atas arahan editor" in result["drafts"][-1]["body_md"]
     assert result["drafts"][0]["body_md"] != result["drafts"][-1]["body_md"]
 
 
@@ -190,18 +190,19 @@ def test_revision_prompt_contains_instructions(client, project, monkeypatch):
     result = approve(client, run, "final", decision="request_revision", comment=instructions)
     assert prompts[-1]["revision_instructions"] == instructions
     assert prompts[-1]["previous_draft"] == result["drafts"][0]["body_md"]
-    assert instructions in result["drafts"][-1]["body_md"]
+    assert "Tanggapan atas arahan editor" in result["drafts"][-1]["body_md"]
+    assert instructions not in result["drafts"][-1]["body_md"]
     assert result["approvals"][-1]["comment"] == instructions
 
 
-@pytest.mark.parametrize("instructions", ["", "   ", "Explain the trade-offs."])
+@pytest.mark.parametrize("instructions", ["", "   ", "Explain the trade-offs.", "Add 3 tips about pots"])
 def test_mock_revision_instructions_empty_and_normal(instructions):
     ctx = {"keyword": "gardening", "language": "en", "audience": "beginners", "revision_instructions": instructions,
            "brief": {"outline": [{"level": 1, "heading": "Gardening"}]}}
     result = MockLLMClient().complete_json("revise", json.dumps(ctx), Draft)
     assert ("Response to editorial instructions" in result.body_md) == bool(instructions.strip())
     if instructions.strip():
-        assert instructions in result.body_md
+        assert instructions not in result.body_md
 
 
 def test_english_html_language_and_empty_approval_comment(client):
