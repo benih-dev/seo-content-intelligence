@@ -52,14 +52,18 @@ def context(db, run):
 def llm_call(db, run, task, schema, extra=None):
     usages = list(db.scalars(select(AuditEvent).where(AuditEvent.run_id == run.id, AuditEvent.action == "llm_usage")))
     spent = sum(x.data.get("cost_usd", 0) for x in usages)
+    pending = db.info.setdefault("llm_usage", [])
+    spent += sum(data.get("cost_usd", 0) for run_id, data in pending if run_id == run.id)
     if spent >= settings.run_budget_usd:
         raise RuntimeError("Run budget exhausted")
     client = get_llm()
     prompt = json.dumps({**context(db, run), **(extra or {})}, ensure_ascii=False)
     start = time.monotonic()
-    result = client.complete_json(task, prompt, schema)
-    for usage in client.usage:
-        db.add(AuditEvent(run_id=run.id, actor="system", action="llm_usage", data={**usage, "latency_ms": round((time.monotonic()-start)*1000), "prompt_version": "v1"}))
+    try:
+        result = client.complete_json(task, prompt, schema)
+    finally:
+        for usage in client.usage:
+            pending.append((run.id, {**usage, "latency_ms": round((time.monotonic()-start)*1000), "prompt_version": "v1"}))
     return result.model_dump()
 
 
@@ -76,13 +80,19 @@ def stage(name, fn, version_fn=lambda db, run: 1):
             token = active_session.set(db)
             try:
                 data = fn(db, run) or {}
+                row = StageArtifact(run_id=run.id, stage=name, version=version, data=data)
+                db.add(row)
+                db.flush()
+                db.add(AuditEvent(run_id=run.id, actor="system", action="stage_complete", data={"stage": name, "artifact_id": row.id, "version": version, "latency_ms": round((time.monotonic()-start)*1000)}))
+                db.commit()
             finally:
                 active_session.reset(token)
-            row = StageArtifact(run_id=run.id, stage=name, version=version, data=data)
-            db.add(row)
-            db.flush()
-            db.add(AuditEvent(run_id=run.id, actor="system", action="stage_complete", data={"stage": name, "artifact_id": row.id, "version": version, "latency_ms": round((time.monotonic()-start)*1000)}))
-            db.commit()
+                usages = db.info.pop("llm_usage", [])
+                db.rollback()
+                if usages:
+                    with Session() as usage_db:
+                        usage_db.add_all(AuditEvent(run_id=run_id, actor="system", action="llm_usage", data=data) for run_id, data in usages)
+                        usage_db.commit()
         return {}
     return node
 
