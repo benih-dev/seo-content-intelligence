@@ -10,8 +10,9 @@ from sqlalchemy.exc import IntegrityError
 
 from seoci.api.schemas import (ApprovalInput, DraftInput, InventoryInput, ProjectInput, RunInput,
                                SitemapInput)
+from seoci.config import settings
 from seoci.db import Session, init_db
-from seoci.export import render_md, row_dict
+from seoci.export import render_md, row_dict, with_article_h1
 from seoci.models import (ApprovalEvent, ArticleDraft, ArtifactFile, AuditEvent, ContentBrief, EvidenceItem,
                           Job, KeywordRecord, Project, QAReview, ResearchSource, SERPSnapshot,
                           SiteContentItem, StageArtifact, WorkflowRun)
@@ -192,7 +193,8 @@ def run_detail(run_id: str, db=Depends(database)):
         return [row_dict(x) for x in db.scalars(select(cls).where(cls.run_id == run.id).order_by(cls.created_at))]
     audit = rows(AuditEvent)
     usage = [x["data"] for x in audit if x["action"] == "llm_usage"]
-    return {**row_dict(run), "artifacts": rows(StageArtifact), "keywords": rows(KeywordRecord),
+    return {**row_dict(run), "revision_limit": settings.max_revision_cycles, "mock_revision": not settings.llm_model,
+            "artifacts": rows(StageArtifact), "keywords": rows(KeywordRecord),
             "serp_snapshots": rows(SERPSnapshot), "briefs": rows(ContentBrief), "sources": rows(ResearchSource),
             "evidence": rows(EvidenceItem), "drafts": rows(ArticleDraft), "qa_reviews": rows(QAReview),
             "approvals": rows(ApprovalEvent), "audit": audit, "jobs": [row_dict(x) for x in db.scalars(select(Job).where(Job.run_id == run.id))],
@@ -209,6 +211,8 @@ def approve(run_id: str, body: ApprovalInput, db=Depends(database)):
         raise HTTPException(409, "Approval does not match the current review gate")
     if body.decision == "request_revision" and body.stage != "final":
         raise HTTPException(422, "Edit keyword/brief in payload and approve; request_revision is for final review")
+    if body.decision == "request_revision" and run.revision_count >= settings.max_revision_cycles:
+        raise HTTPException(409, "AI revision limit reached; edit the latest draft in Markdown")
     if body.stage == "keyword":
         keyword = body.payload.get("keyword", run.primary_keyword)
         if not db.scalar(select(KeywordRecord.id).where(KeywordRecord.run_id == run_id, KeywordRecord.keyword == keyword)):
@@ -238,13 +242,18 @@ def edit_draft(run_id: str, body: DraftInput, db=Depends(database)):
     old = latest(db, ArticleDraft, run_id)
     if not old:
         raise HTTPException(409, "No draft exists")
+    if not body.body_md.strip():
+        raise HTTPException(422, "Article Markdown cannot be blank")
+    metadata = with_article_h1(body.body_md, {**old.metadata_json, **(body.metadata_json or {})})
+    if body.body_md == old.body_md and metadata == {**old.metadata_json, "h1": metadata["h1"]}:
+        raise HTTPException(409, "No draft changes to save")
     if run.state == "blocked":
         run.resume_state = "revision_required"
         transition(db, run, "resumed", actor="user", reason="Manual takeover")
     transition(db, run, "revision_required", actor="user", reason="Manual draft edit")
     draft = ArticleDraft(run_id=run_id, version=old.version + 1, body_md=body.body_md,
-                         body_html=render_md(body.body_md), metadata_json=body.metadata_json or old.metadata_json,
-                         data={"change_log": "Manual edit"})
+                         body_html=render_md(body.body_md), metadata_json=metadata,
+                         data={"change_log": "Manual edit", "origin": "manual"})
     db.add(draft)
     db.flush()
     transition(db, run, "qa", actor="user", reason="Recheck manually edited draft", artifact_ref=draft.id)

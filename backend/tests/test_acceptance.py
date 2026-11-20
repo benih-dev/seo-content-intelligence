@@ -126,12 +126,22 @@ def test_export_special_characters():
 def test_manual_versions_and_diff(client, project):
     run = to_final(client, project)
     old = detail(client, run)["drafts"][-1]
-    response = client.put(f"/api/runs/{run}/draft", json={"body_md": old["body_md"] + "\n\nCatatan editor: sesuaikan dengan kondisi Anda."})
+    endpoint = f"/api/runs/{run}/draft"
+    assert client.put(endpoint, json={"body_md": old["body_md"]}).status_code == 409
+    assert client.put(endpoint, json={"body_md": old["body_md"], "metadata_json": {"h1": "Not the article's heading"}}).status_code == 409
+    assert client.put(endpoint, json={"body_md": " \n "}).status_code == 422
+    body = "Berkebun di balkon:\n*catatan editor*\n===" + old["body_md"][old["body_md"].index("\n"):]
+    response = client.put(endpoint, json={"body_md": body + "\n\nCatatan editor: sesuaikan dengan kondisi Anda."})
     assert response.status_code == 202
     work_once()
     result = detail(client, run)
     assert result["state"] == "final_review", result.get("error")
     assert len(result["drafts"]) == 2
+    edited = result["drafts"][-1]
+    assert result["drafts"][0] == old
+    assert edited["metadata_json"]["h1"] == "Berkebun di balkon: catatan editor"
+    assert edited["metadata_json"]["slug"] == old["metadata_json"]["slug"]
+    assert result["qa_reviews"][-1]["draft_id"] == edited["id"]
     assert "+Catatan editor" in client.get(f"/api/runs/{run}/drafts/diff?a=1&b=2").json()["diff"]
     assert client.get(f"/api/runs/{run}/drafts/diff?a=1&b=99").status_code == 404
 
@@ -140,12 +150,47 @@ def test_brief_edits_and_final_revision(client, project):
     run = new_run(client, project)
     work_once()
     approve(client, run, "keyword")
-    result = approve(client, run, "brief", payload={"edits": {"angle": "A tailored balcony guide"}})
+    outline = detail(client, run)["briefs"][-1]["data"]["outline"]
+    outline[0]["heading"] = "Berkebun di balkon sesuai kebutuhan Anda"
+    result = approve(client, run, "brief", payload={"edits": {"angle": "A tailored balcony guide", "outline": outline}})
     assert result["briefs"][-1]["data"]["angle"] == "A tailored balcony guide"
     assert len(result["briefs"]) == 2
+    assert result["drafts"][-1]["metadata_json"]["h1"] == outline[0]["heading"]
     result = approve(client, run, "final", decision="request_revision", comment="Make the explanation clearer")
     assert result["state"] == "final_review", result.get("error")
     assert len(result["drafts"]) == 2
+
+
+def test_manual_qa_holds_the_saved_draft_and_mock_revision_preserves_it(client, project, monkeypatch):
+    monkeypatch.setattr(settings, "max_revision_cycles", 1)
+    run = to_final(client, project)
+    original = detail(client, run)["drafts"][-1]["body_md"]
+    edited = original + "\n\nCatatan editor: periksa izin sebelum memasang pot."
+    with_claim = edited + "\n\nTanaman tumbuh 80% lebih cepat."
+    endpoint = f"/api/runs/{run}/draft"
+
+    assert client.put(endpoint, json={"body_md": with_claim}).status_code == 202
+    assert work_once()
+    result = detail(client, run)
+    assert result["state"] == "blocked"
+    assert len(result["drafts"]) == 2
+    assert result["drafts"][-1]["body_md"] == with_claim
+    assert result["qa_reviews"][-1]["draft_id"] == result["drafts"][-1]["id"]
+    assert any(f["finding"] == "Unsupported numeric claim" for f in result["qa_reviews"][-1]["data"]["findings"])
+    assert result["revision_count"] == 0
+
+    assert client.put(endpoint, json={"body_md": edited}).status_code == 202
+    assert work_once()
+    result = approve(client, run, "final", decision="request_revision", comment="Keep the editor's note.")
+    assert result["state"] == "final_review"
+    assert result["drafts"][-1]["body_md"] == edited
+    assert "Markdown unchanged" in result["drafts"][-1]["data"]["change_log"]
+    assert result["revision_count"] == result["revision_limit"] == 1
+    assert client.post(f"/api/runs/{run}/approve", json={
+        "stage": "final", "decision": "request_revision", "comment": "Try again",
+    }).status_code == 409
+    assert approve(client, run, "final")["state"] == "exported"
+    assert client.get(f"/api/runs/{run}/export/md").text == edited
 
 
 def test_revision_cap_and_manual_takeover(client, project, monkeypatch):

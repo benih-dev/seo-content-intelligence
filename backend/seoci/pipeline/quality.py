@@ -1,6 +1,8 @@
 import re
 from urllib.parse import unquote, urljoin, urlparse
 
+from seoci.export import markdown_headings
+
 DIMENSIONS = ["Intent satisfaction", "Accuracy & evidence", "Original value", "Editorial quality",
               "On-page completeness", "Trust & accountability"]
 WEIGHTS = {"blog_topic_fit": .25, "intent_fit": .20, "serp_attainability_gap": .20,
@@ -94,15 +96,13 @@ def check_article(body, metadata, evidence, inventory, keyword, expert=False, pr
             supported = any(ev.get("claim") and url in line and str(ev["claim"]) in line for ev in evidence for url in [ev["url"]])
             if not supported:
                 add("Accuracy & evidence", "blocker", f"line:{i}", "Unsupported numeric claim", "Add evidence for this exact claim or remove it")
+    headings = list(markdown_headings(body))
     previous = 0
-    for i, line in enumerate(body.splitlines(), 1):
-        match = re.match(r"^(#{1,6}) ", line)
-        if match:
-            level = len(match[1])
-            if (previous == 0 and level != 1) or level > previous + 1:
-                add("On-page completeness", "major", f"line:{i}", "Heading hierarchy skips a level", "Use sequential heading levels")
-            previous = level
-    if len(re.findall(r"^# ", body, re.M)) != 1:
+    for line_number, level, _ in headings:
+        if level > previous + 1:
+            add("On-page completeness", "major", f"line:{line_number}", "Heading hierarchy skips a level", "Use sequential heading levels")
+        previous = level
+    if sum(level == 1 for _, level, _ in headings) != 1:
         add("On-page completeness", "major", "headings", "Expected exactly one H1", "Use one descriptive H1")
     if not 70 <= len(metadata.get("meta_description", "")) <= 160:
         add("On-page completeness", "major", "meta_description", "Meta description length outside editorial range", "Use a concise description of 70–160 characters")

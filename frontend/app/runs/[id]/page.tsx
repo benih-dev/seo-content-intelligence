@@ -333,27 +333,33 @@ export default function RunPage({
               />
             )}
             {tab === "research" && <ResearchPanel run={run} />}
-            {tab === "article" && (
+            <div hidden={tab !== "article"}>
               <ArticlePanel
-                key={run.drafts.at(-1)?.id || "waiting"}
+                key={run.drafts.at(-1)?.id || run.id}
                 run={run}
                 command={command}
                 busy={disabled}
               />
-            )}
+            </div>
             {tab === "seo" && <SEOContent run={run} />}
             {tab === "qa" && (
               <Panel
                 title="Editorial quality review"
                 eyebrow={`DRAFT VERSION ${run.drafts.at(-1)?.version || "—"}`}
               >
-                <Findings review={run.qa_reviews.at(-1)} />
-                {run.state === "final_review" && (
+                <Findings
+                  review={run.qa_reviews.findLast(
+                    (review) => review.draft_id === run.drafts.at(-1)?.id,
+                  )}
+                />
+                {["final_review", "blocked"].includes(run.state) && (
                   <button
                     className="button primary"
                     onClick={() => setTab("article")}
                   >
-                    Review article & approve
+                    {run.state === "blocked"
+                      ? "Open article to fix findings"
+                      : "Review article & approve"}
                     <ArrowRight size={15} />
                   </button>
                 )}

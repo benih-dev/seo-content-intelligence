@@ -154,6 +154,8 @@ export interface RunSummary {
   error: string | null;
 }
 export interface Run extends RunSummary {
+  revision_limit: number;
+  mock_revision: boolean;
   context: { project?: Project };
   artifacts: (Version & { stage: string; data: Record<string, unknown> })[];
   keywords: Keyword[];
