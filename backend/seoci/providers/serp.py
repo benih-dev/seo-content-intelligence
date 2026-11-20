@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from seoci.config import settings
+from seoci.app_settings import resolve_settings
 from seoci.models import now
 from seoci.providers.demo_topics import topic_sources
 from seoci.providers.network import cached, dfs, dfs_location
@@ -40,4 +40,4 @@ class DataForSEOSerp:
 
 
 def get_serp():
-    return DataForSEOSerp() if settings.serp_provider == "dataforseo" else MockSerp()
+    return DataForSEOSerp() if resolve_settings().values["serp_provider"] == "dataforseo" else MockSerp()

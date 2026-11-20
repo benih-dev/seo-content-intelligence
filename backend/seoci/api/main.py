@@ -11,6 +11,8 @@ from sqlalchemy.exc import IntegrityError
 from seoci.api.schemas import (ApprovalInput, DraftInput, InventoryInput, ProjectInput, RunInput,
                                SitemapInput)
 from seoci.config import settings
+from seoci.app_settings import resolve_settings
+from seoci.api.settings import router as settings_router
 from seoci.db import Session, init_db
 from seoci.export import render_md, row_dict, with_article_h1
 from seoci.models import (ApprovalEvent, ArticleDraft, ArtifactFile, AuditEvent, ContentBrief, EvidenceItem,
@@ -30,6 +32,7 @@ async def lifespan(app):
 
 
 app = FastAPI(title="SEO Content Intelligence", version="0.1.0", lifespan=lifespan)
+app.include_router(settings_router)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -207,7 +210,7 @@ def run_detail(run_id: str, db=Depends(database)):
         return [row_dict(x) for x in db.scalars(select(cls).where(cls.run_id == run.id).order_by(cls.created_at))]
     audit = rows(AuditEvent)
     usage = [x["data"] for x in audit if x["action"] == "llm_usage"]
-    return {**row_dict(run), "revision_limit": settings.max_revision_cycles, "mock_revision": not settings.llm_model,
+    return {**row_dict(run), "revision_limit": settings.max_revision_cycles, "mock_revision": not resolve_settings(db).values["llm_model"],
             "github_publish": run.context.get("github_publish"),
             "artifacts": rows(StageArtifact), "keywords": rows(KeywordRecord),
             "serp_snapshots": rows(SERPSnapshot), "briefs": rows(ContentBrief), "sources": rows(ResearchSource),

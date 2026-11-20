@@ -13,6 +13,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from seoci.config import settings
+from seoci.app_settings import resolve_settings
 from seoci.db import Session
 from seoci.models import ResponseCache
 
@@ -62,11 +63,15 @@ def cached(provider, query, locale, device, fetch):
 
 
 def dfs(endpoint, payload):
-    data = request("POST", "https://api.dataforseo.com/v3/" + endpoint,
-                   auth=(settings.dataforseo_login, settings.dataforseo_password), json=[payload]).json()
+    config = resolve_settings().values
+    try:
+        data = request("POST", "https://api.dataforseo.com/v3/" + endpoint,
+                       auth=(config["dataforseo_login"], config["dataforseo_password"]), json=[payload]).json()
+    except Exception:
+        raise RuntimeError("DataForSEO request failed; check provider settings") from None
     tasks = data.get("tasks") or []
     if not tasks or tasks[0].get("status_code") != 20000:
-        raise RuntimeError("DataForSEO task failed: " + str(data.get("status_message", tasks[0].get("status_message") if tasks else "no tasks")))
+        raise RuntimeError("DataForSEO task failed; check provider settings and account status")
     return tasks[0].get("result") or []
 
 
@@ -74,8 +79,12 @@ def dfs_location(country, family="serp/google"):
     if len(country) != 2:
         return {"location_name": country}
     def fetch():
-        data = request("GET", f"https://api.dataforseo.com/v3/{family}/locations/{country.lower()}",
-                       auth=(settings.dataforseo_login, settings.dataforseo_password)).json()
+        config = resolve_settings().values
+        try:
+            data = request("GET", f"https://api.dataforseo.com/v3/{family}/locations/{country.lower()}",
+                           auth=(config["dataforseo_login"], config["dataforseo_password"])).json()
+        except Exception:
+            raise RuntimeError("DataForSEO location request failed; check provider settings") from None
         tasks = data.get("tasks") or []
         if not tasks or tasks[0].get("status_code") != 20000:
             raise RuntimeError("DataForSEO location lookup failed")

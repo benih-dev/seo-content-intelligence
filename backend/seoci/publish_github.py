@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from seoci.api.schemas import PublishingConfig
 from seoci.config import settings
+from seoci.app_settings import resolve_settings
 
 
 def blog_file(draft):
@@ -26,18 +27,19 @@ def blog_file(draft):
 
 def publish(project, run, draft, qa_status, client=None):
     config = PublishingConfig.model_validate(project.publishing or {})
+    credentials = resolve_settings().values
     if not config.github_repo:
         raise HTTPException(400, "Configure github_repo in project publishing settings first")
-    if not settings.github_token:
-        raise HTTPException(400, "GitHub token is not configured; set GITHUB_TOKEN on the server")
+    if not credentials["github_token"]:
+        raise HTTPException(400, "GitHub token is not configured; use Settings or set GITHUB_TOKEN on the server")
     if client is None:
         with httpx.Client(timeout=settings.network_timeout) as owned:
             return publish(project, run, draft, qa_status, client=owned)
 
     def request(method, path, **kwargs):
         try:
-            response = client.request(method, f"{settings.github_api_url.rstrip('/')}/repos/{config.github_repo}/{path}",
-                                      headers={"Authorization": f"Bearer {settings.github_token}",
+            response = client.request(method, f"{credentials['github_api_url'].rstrip('/')}/repos/{config.github_repo}/{path}",
+                                      headers={"Authorization": f"Bearer {credentials['github_token']}",
                                                "Accept": "application/vnd.github+json",
                                                "X-GitHub-Api-Version": "2022-11-28"}, **kwargs)
         except httpx.RequestError:
