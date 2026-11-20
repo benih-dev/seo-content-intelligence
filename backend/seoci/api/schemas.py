@@ -15,11 +15,23 @@ class ProjectInput(BaseModel):
     rules: dict = Field(default_factory=dict)
     business_objective: str = "Educate readers"
 
+    @field_validator("name", "niche", "audience", mode="before")
+    @classmethod
+    def strip_required(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
     @field_validator("domain")
     @classmethod
     def domain_valid(cls, value):
-        if urlparse(value).scheme not in {"https", "http"} or not urlparse(value).hostname:
-            raise ValueError("domain must be a full HTTP(S) URL")
+        value = value.strip()
+        if "://" not in value:
+            value = f"https://{value}"
+        parsed = urlparse(value)
+        if (parsed.scheme not in {"https", "http"} or not parsed.hostname or
+                parsed.username is not None or parsed.password is not None or
+                (parsed.port is not None and parsed.port <= 0) or
+                any(char.isspace() for char in value)):
+            raise ValueError("Enter a website domain such as example.com or https://example.com")
         return value.rstrip("/")
 
     @field_validator("language", "country")

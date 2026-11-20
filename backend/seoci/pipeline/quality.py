@@ -2,6 +2,7 @@ import re
 from urllib.parse import unquote, urljoin, urlparse
 
 from seoci.export import markdown_headings
+from seoci.urls import site_hostname
 
 DIMENSIONS = ["Intent satisfaction", "Accuracy & evidence", "Original value", "Editorial quality",
               "On-page completeness", "Trust & accountability"]
@@ -94,7 +95,7 @@ def ymyl(keyword):
 
 def url_key(url):
     parsed = urlparse(url)
-    return parsed.hostname, unquote(parsed.path).rstrip("/") or "/"
+    return site_hostname(parsed.hostname), unquote(parsed.path).rstrip("/") or "/"
 
 
 def proposed_url(domain, slug):
@@ -156,9 +157,9 @@ def check_article(body, metadata, evidence, inventory, keyword, expert=False, pr
         add("On-page completeness", "major", "slug", "Invalid slug", "Use lowercase hyphen-separated words")
     known = set(inventory)
     known_keys = {url_key(url) for url in known}
-    hosts = {urlparse(x).hostname for x in known}
+    hosts = {host for host, _ in known_keys}
     if project_domain:
-        hosts.add(urlparse(project_domain).hostname)
+        hosts.add(site_hostname(urlparse(project_domain).hostname))
     domains = [project_domain] if project_domain else [f"{urlparse(url).scheme}://{urlparse(url).netloc}" for url in known]
     slug = metadata.get("slug", "")
     proposed = {url_key(proposed_url(domain, slug)) for domain in domains} if slug else set()
@@ -170,9 +171,10 @@ def check_article(body, metadata, evidence, inventory, keyword, expert=False, pr
         url = urljoin(proposed_url(domains[0], slug), href) if domains else href
         if urlparse(url).scheme not in {"http", "https"}:
             continue
-        if url_key(url) in proposed:
+        key = url_key(url)
+        if key in proposed:
             add("On-page completeness", "major", href, "Self-referencing internal link", "Remove this link or choose a different article URL")
-        if urlparse(url).hostname in hosts and url_key(url) not in known_keys:
+        if key[0] in hosts and key not in known_keys:
             add("On-page completeness", "major", url, "Unknown internal link", "Choose an existing inventory URL")
     words = body.split()
     if body.lower().count(keyword.lower()) * max(1, len(keyword.split())) / max(1, len(words)) > .07:

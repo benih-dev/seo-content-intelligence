@@ -69,7 +69,8 @@ Mutating workflow endpoints enqueue a job and return immediately; poll detail ev
 - `GET /api/projects` -> `Project[]`.
 - `POST /api/projects` (201), `PUT /api/projects/{id}` -> `Project`.
   Input: `{name,domain,niche,audience,language?:"id",country?:"ID",voice_profile?:string,
-  rules?:object,business_objective?:string}`. First four required; domain is full URL.
+  rules?:object,business_objective?:string}`. First four required; a bare domain defaults to HTTPS.
+  The web form stores plain-text editorial rules in `rules.instructions`.
   Project adds `{id,version,created_at}`. PUT is full replacement, increments profile version;
   runs retain their own project snapshot.
 - `GET /api/projects/{id}` -> `Project`; `DELETE /api/projects/{id}` -> 204.
@@ -78,9 +79,12 @@ Mutating workflow endpoints enqueue a job and return immediately; poll detail ev
 - `GET /api/projects/{id}/content-items` -> `ContentItem[]`.
 - `POST /api/projects/{id}/content-items` input `{items:[{url,title?,slug?,status?,metadata_json?}]}`
   -> `{items:ContentItem[],failures:[{url,error}]}`. Upsert by project/url, maximum 200 per request.
-  ContentItem adds `{id,project_id,last_seen_at}`; off-domain URLs are rejected per item.
+  ContentItem adds `{id,project_id,last_seen_at}`; malformed or off-site URLs are rejected per item.
+  Omitted fields are preserved when a known URL is reimported.
 - `POST /api/projects/{id}/sitemap` (202) input `{url}` -> same import result shape. Bounded synchronous
-  connector import (not article pipeline work), supports sitemap indexes. Import failures do not abort siblings.
+  connector import (not article pipeline work), supports sitemap indexes and same-site redirects,
+  including the bare domain and its `www` variant. Import failures do not abort siblings.
+  URL-level `lastmod` metadata is saved as `metadata_json.sitemap_lastmod`; pages are not fetched.
 
 ### Runs
 

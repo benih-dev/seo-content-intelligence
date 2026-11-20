@@ -289,7 +289,7 @@ def test_real_adapters_normalize_and_cache(client, monkeypatch):
 def test_sitemap_index_partial_failures(client, project, monkeypatch):
     from seoci.providers import sitemap
     monkeypatch.setattr(sitemap, "safe_url", lambda url: url)
-    def request(method, url):
+    def request(method, url, *, allow_redirect_response):
         if url.endswith("sitemap.xml"):
             content = '<sitemapindex><sitemap><loc>https://example.com/ok.xml</loc></sitemap><sitemap><loc>https://example.com/bad.xml</loc></sitemap></sitemapindex>'
         elif url.endswith("ok.xml"):

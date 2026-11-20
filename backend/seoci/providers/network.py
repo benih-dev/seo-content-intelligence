@@ -31,10 +31,11 @@ def safe_url(url):
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.2, max=2),
        retry=retry_if_exception_type((httpx.TransportError, httpx.HTTPStatusError)), reraise=True)
-def request(method, url, **kwargs):
+def request(method, url, *, allow_redirect_response=False, **kwargs):
     with httpx.Client(timeout=settings.network_timeout, follow_redirects=False) as client:
         response = client.request(method, url, **kwargs)
-        response.raise_for_status()
+        if not (allow_redirect_response and response.has_redirect_location):
+            response.raise_for_status()
         return response
 
 
