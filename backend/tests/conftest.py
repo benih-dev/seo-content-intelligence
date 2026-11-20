@@ -4,10 +4,16 @@ from fastapi.testclient import TestClient
 from seoci import db
 from seoci.api.main import app
 from seoci.config import settings
+from seoci import auth
+
+
+@pytest.fixture(scope="session")
+def user_hash():
+    return auth.hash_password("test-password")
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def raw_client(tmp_path, monkeypatch):
     url = f"sqlite:///{tmp_path}/test.db"
     engine = db.make_engine(url)
     monkeypatch.setattr(db, "engine", engine)
@@ -16,9 +22,19 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "llm_model", "")
     monkeypatch.setattr(settings, "serp_provider", "mock")
     monkeypatch.setattr(settings, "run_budget_usd", 2)
+    monkeypatch.setattr(settings, "auth_users_file", str(tmp_path / "auth-users"))
+    monkeypatch.setattr(settings, "auth_secret", "test-session-secret-with-at-least-32-characters")
+    monkeypatch.setattr(auth, "throttle", auth.LoginThrottle())
     with TestClient(app) as test_client:
         yield test_client
     engine.dispose()
+
+
+@pytest.fixture
+def client(raw_client, user_hash):
+    auth.users_path().write_text(f"tester:{user_hash}\n")
+    raw_client.cookies.set(auth.COOKIE, auth.create_session("tester"))
+    return raw_client
 
 
 @pytest.fixture

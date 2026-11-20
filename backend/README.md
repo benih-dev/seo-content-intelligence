@@ -1,7 +1,8 @@
 # SEO Content Intelligence backend
 
 Python 3.12, FastAPI, SQLAlchemy, LangGraph and a database-backed queue. Local, single-operator MVP;
-no authentication is included: bind to loopback only. Do not expose this service on the Internet.
+local-file username/password authentication is included. Bind to loopback by default;
+use HTTPS and a trusted reverse proxy for non-local access. All accounts have full access.
 
 ## Run
 
@@ -57,7 +58,10 @@ JSON unless noted. All ids are UUID strings; times are ISO-8601 UTC strings. Err
 partial updates; omitted fields stay unchanged and `null` removes a DB override.
 Its validation errors return a generic message and field names, never input values.
 See [web Settings](../README.md#settings-melalui-web) for precedence, write-only
-credentials, audit behavior and the unauthenticated deployment warning.
+credentials and audit behavior. See [local login](../README.md#login-dan-akun-lokal)
+for first-run setup, the account CLI, session cookies and authentication environment variables.
+All `/api/*` endpoints require a session except health and auth status/setup/login/logout.
+Auth validation errors never echo credentials. Seed/demo scripts prompt for login.
 
 Mutating pipeline commands enqueue a job and return immediately; poll detail every two seconds.
 GitHub publishing is a synchronous connector request, not a worker job.
@@ -178,7 +182,7 @@ demo drafting; FR-040–045: SEO, six QA dimensions, deterministic checks and ca
 FR-050–053: gated portable exports, stable package ids, immutable versions and manual editing/diff.
 Tests cover every design-listed PRD §11 case plus full API→worker→approval→export execution.
 
-Production hardening still needed: authentication/authorization,
+Production hardening still needed: granular authorization, distributed login throttling,
 verified topic research/claim extraction beyond the conservative numeric-claim rules, per-provider quota
 scheduling, strict pre-flight token budget reservation, migrations with frozen historical table definitions,
 and retention tooling for application plus checkpoint data. Initial Alembic revision creates all initial

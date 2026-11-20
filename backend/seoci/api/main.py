@@ -2,7 +2,8 @@ import difflib
 import hashlib
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 from sqlalchemy import select, text
@@ -13,6 +14,8 @@ from seoci.api.schemas import (ApprovalInput, DraftInput, InventoryInput, Projec
 from seoci.config import settings
 from seoci.app_settings import resolve_settings
 from seoci.api.settings import router as settings_router
+from seoci.api.auth import router as auth_router
+from seoci import auth
 from seoci.db import Session, init_db
 from seoci.export import render_md, row_dict, with_article_h1
 from seoci.models import (ApprovalEvent, ArticleDraft, ArtifactFile, AuditEvent, ContentBrief, EvidenceItem,
@@ -33,7 +36,25 @@ async def lifespan(app):
 
 app = FastAPI(title="SEO Content Intelligence", version="0.1.0", lifespan=lifespan)
 app.include_router(settings_router)
+app.include_router(auth_router)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"], allow_methods=["*"], allow_headers=["*"])
+
+
+@app.middleware("http")
+async def authenticate(request: Request, call_next):
+    public = {"/api/health", "/api/auth/status", "/api/auth/setup", "/api/auth/login", "/api/auth/logout"}
+    if request.url.path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"} and request.headers.get("sec-fetch-site") == "cross-site":
+        return JSONResponse(status_code=403, content={"detail": "Cross-site requests are not allowed"})
+    try:
+        if request.url.path.startswith("/api/") and request.url.path not in public:
+            username = auth.session_user(request.cookies.get(auth.COOKIE))
+            if not username:
+                return JSONResponse(status_code=401, content={"detail": "Authentication required", "setup_required": not bool(auth.load_users())},
+                                    headers={"Cache-Control": "no-store"})
+            request.state.username = username
+        return await call_next(request)
+    except OSError:
+        return JSONResponse(status_code=503, content={"detail": "Authentication storage unavailable; check server file permissions"})
 
 
 def database():

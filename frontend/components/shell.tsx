@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { api, authPath } from "@/lib/api";
+import { ErrorNotice, Loading } from "@/components/ui";
 import { ThemeSelect } from "@/components/theme-select";
 import {
   ArrowUpRight,
@@ -19,6 +22,49 @@ import {
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
+  const router = useRouter();
+  const [account, setAccount] = useState<{ username: string }>();
+  const [error, setError] = useState("");
+  const publicPage = path === "/login" || path === "/setup";
+  useEffect(() => {
+    let live = true;
+    async function check() {
+      try {
+        const status = await api<{ setup_required: boolean }>("/auth/status");
+        if (!live) return;
+        if (status.setup_required) {
+          if (path !== "/setup") router.replace(authPath(true));
+          return;
+        }
+        if (path === "/setup") { router.replace("/login"); return; }
+        try {
+          const user = await api<{ username: string }>("/auth/me");
+          if (live) { setAccount(user); if (publicPage) router.replace("/"); }
+        } catch {
+          if (live && !publicPage) router.replace("/login");
+        }
+      } catch {
+        if (live) setError("Unable to check your session. Please reload to retry.");
+      }
+    }
+    void check();
+    return () => { live = false; };
+  }, [path, publicPage, router]);
+
+  async function logout() {
+    try {
+      await api("/auth/logout", {});
+      setAccount(undefined);
+      router.replace("/login");
+    } catch { setError("Sign out failed. Please retry."); }
+  }
+
+  if (publicPage || !account) {
+    return <div className="auth-shell">
+      <header className="topbar"><strong>Content Intelligence</strong><ThemeSelect /></header>
+      <main id="main" className="auth-main"><ErrorNotice error={error} />{publicPage ? children : !error && <Loading />}</main>
+    </div>;
+  }
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="Workspace navigation">
@@ -86,8 +132,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <div className="operator">
             <span className="operator-avatar">EW</span>
             <div>
-              <strong>Editorial workspace</strong>
-              <small>Local · Single operator</small>
+              <strong>{account.username}</strong>
+              <button className="button" type="button" onClick={logout}>Log out</button>
             </div>
           </div>
         </div>
@@ -109,7 +155,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <ThemeSelect />
           </div>
         </header>
-        <main id="main">{children}</main>
+        <main id="main"><ErrorNotice error={error} />{children}</main>
         <footer className="main-footer">
           SEO Content Intelligence{" "}
           <span>Built for thoughtful content, not content at scale.</span>

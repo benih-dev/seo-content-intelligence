@@ -1,10 +1,13 @@
 """Seed the running API/worker with a reviewable run and an exported article."""
 import json
+import getpass
+from http.cookiejar import CookieJar
 import os
 import time
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, HTTPCookieProcessor
 
 BASE = os.environ.get("API_URL", "http://127.0.0.1:8000")
+OPENER = build_opener(HTTPCookieProcessor(CookieJar()))
 
 
 def call(path, body=None, key=None):
@@ -12,7 +15,7 @@ def call(path, body=None, key=None):
     if key:
         headers["Idempotency-Key"] = key
     request = Request(BASE + "/api" + path, data=json.dumps(body).encode() if body is not None else None, headers=headers)
-    with urlopen(request, timeout=30) as response:
+    with OPENER.open(request, timeout=30) as response:
         return json.load(response)
 
 
@@ -28,6 +31,7 @@ def wait(run_id, state):
 
 
 def main():
+    call("/auth/login", {"username": input("Username: "), "password": getpass.getpass("Password: ")})
     projects = call("/projects")
     project = next((p for p in projects if p["name"] == "Kebun Balkon"), None)
     if not project:
