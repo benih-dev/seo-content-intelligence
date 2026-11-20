@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { api, authPath } from "@/lib/api";
 import { ErrorNotice, Loading } from "@/components/ui";
 import { ThemeSelect } from "@/components/theme-select";
+import { TextSizeSelect } from "@/components/text-size-select";
 import {
   ArrowUpRight,
   Boxes,
@@ -61,7 +62,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   if (publicPage || !account) {
     return <div className="auth-shell">
-      <header className="topbar"><strong>Content Intelligence</strong><ThemeSelect /></header>
+      <header className="topbar"><strong>Content Intelligence</strong><div className="topbar-actions"><ThemeSelect /><TextSizeSelect /></div></header>
       <main id="main" className="auth-main"><ErrorNotice error={error} />{publicPage ? children : !error && <Loading />}</main>
     </div>;
   }
@@ -153,6 +154,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <Sparkles size={15} />
             </span>
             <ThemeSelect />
+            <TextSizeSelect />
           </div>
         </header>
         <main id="main"><ErrorNotice error={error} />{children}</main>
