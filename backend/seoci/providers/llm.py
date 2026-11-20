@@ -103,8 +103,11 @@ class MockLLMClient:
                     "questions": [f"Bagaimana memulai {k}?", "Apa kesalahan yang perlu dihindari?"] if indo else [f"How do I start with {k}?", "What mistakes should I avoid?"],
                     "exclusions": ["Unverified statistics", "Personal professional advice", "Invented credentials"],
                     "internal_links": ctx.get("inventory", []), "source_plan": [k, f"{k} authoritative guidance"]}
-        elif task in {"draft", "revise"}:
-            data = {"body_md": self.article(ctx, indo), "change_log": "Rebuilt from approved brief; removed unsupported quantitative claims" if task == "revise" else "Initial evidence-led draft"}
+        elif task == "draft":
+            data = {"body_md": self.article(ctx, indo), "change_log": "Initial evidence-led draft"}
+        elif task == "revise":
+            data = {"body_md": ctx["previous_draft"],
+                    "change_log": "Demo revision: Markdown unchanged. Apply feedback manually."}
         elif task == "seo":
             desc = (f"Pelajari {k} melalui langkah praktis, perbandingan pilihan, contoh penerapan, dan daftar periksa agar keputusan Anda lebih terarah." if indo else
                     f"Explore {k} with a practical plan, comparison table, worked example and review checklist. Understand the trade-offs before you begin.")

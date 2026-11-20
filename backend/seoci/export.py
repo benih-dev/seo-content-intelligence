@@ -9,6 +9,20 @@ from seoci.models import (ArticleDraft, ArtifactFile, ContentBrief, EvidenceItem
                           ResearchSource, WorkflowRun)
 
 
+def markdown_headings(body):
+    tokens = MarkdownIt("commonmark", {"html": False}).parse(body)
+    for i, token in enumerate(tokens):
+        if token.type == "heading_open":
+            text = "".join(child.content for child in tokens[i + 1].children or []
+                           if child.type in {"text", "code_inline", "image"})
+            yield token.map[0] + 1, int(token.tag[1:]), text
+
+
+def with_article_h1(body, metadata):
+    h1 = next((text for _, level, text in markdown_headings(body) if level == 1), "")
+    return {**metadata, "h1": h1}
+
+
 def render_md(body):
     return MarkdownIt("commonmark", {"html": False}).enable("table").render(body)
 

@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from seoci.config import settings
 from seoci.db import Session
-from seoci.export import build_exports, render_md, row_dict
+from seoci.export import build_exports, render_md, row_dict, with_article_h1
 from seoci.models import (ApprovalEvent, ArticleDraft, AuditEvent, ContentBrief, EvidenceItem, KeywordMetricSnapshot,
                           Job, KeywordRecord, Project, QAReview, ResearchSource, SERPResult, SERPSnapshot,
                           SiteContentItem, StageArtifact, WorkflowRun, now)
@@ -217,11 +217,14 @@ def drafting(db, run):
     feedback = {"previous_draft": old.body_md if old else None}
     if old:
         review = latest(db, QAReview, run.id)
-        approval = db.scalar(select(ApprovalEvent).where(ApprovalEvent.run_id == run.id,
-                             ApprovalEvent.stage == "final", ApprovalEvent.decision == "request_revision")
-                             .order_by(ApprovalEvent.created_at.desc()).limit(1))
+        approval = db.scalar(select(ApprovalEvent).where(
+            ApprovalEvent.run_id == run.id, ApprovalEvent.stage == "final",
+            ApprovalEvent.decision == "request_revision", ApprovalEvent.created_at >= review.created_at,
+        ).order_by(ApprovalEvent.created_at.desc()).limit(1)) if review else None
         feedback.update(reviewer_comment=approval.comment if approval else None,
-                        qa_findings=review.data.get("findings", []) if review else [])
+                        qa_findings=review.data.get("findings", []) if review else [],
+                        revision_instruction="Revise the previous draft in place. Preserve existing edits and "
+                        "sections unless the reviewer comment or QA findings require changing them.")
     data = llm_call(db, run, "revise" if old else "draft", Draft, feedback)
     row = ArticleDraft(run_id=run.id, version=version, body_md=data["body_md"], body_html=render_md(data["body_md"]), data={"change_log": data["change_log"]})
     db.add(row)
@@ -234,7 +237,9 @@ def optimizing(db, run):
     row = latest(db, ArticleDraft, run.id)
     row.metadata_json = {**llm_call(db, run, "seo", SEO, {"body_md": row.body_md}), "primary_keyword": run.primary_keyword, "locale": run.locale}
     ctx = context(db, run)
-    row.metadata_json = {**row.metadata_json, "slug": available_slug(row.metadata_json["slug"], ctx["domain"], ctx["inventory"])}
+    row.metadata_json = with_article_h1(row.body_md, {
+        **row.metadata_json, "slug": available_slug(row.metadata_json["slug"], ctx["domain"], ctx["inventory"]),
+    })
     transition(db, run, "qa", reason="SEO metadata generated", artifact_ref=row.id)
     return row.metadata_json
 
@@ -252,7 +257,9 @@ def qa(db, run):
     human_flags = {"Expert review required", "YMYL sources need human verification"}
     unresolved = [x for x in result["findings"] if x.get("severity") in {"blocker", "major"}
                   and x.get("finding") not in human_flags]
-    if unresolved and run.revision_count < settings.max_revision_cycles:
+    if unresolved and row.data.get("origin") == "manual":
+        transition(db, run, "blocked", reason="Manual draft needs fixes; see QA findings", artifact_ref=row.id)
+    elif unresolved and run.revision_count < settings.max_revision_cycles:
         run.revision_count += 1
         transition(db, run, "revision_required", reason="QA requires revision")
     elif unresolved:
