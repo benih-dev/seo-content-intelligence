@@ -315,7 +315,10 @@ class LiteLLMClient:
             def complete():
                 return litellm.completion(model=settings.llm_model, messages=messages, response_format={"type": "json_object"}, timeout=settings.network_timeout, **options)
             response = complete()
-            cost = litellm.completion_cost(completion_response=response) or 0
+            try:
+                cost = litellm.completion_cost(completion_response=response) or 0
+            except Exception:
+                cost = 0
             self.usage.append({"task": task, "model": settings.llm_model, "prompt_tokens": response.usage.prompt_tokens,
                                "completion_tokens": response.usage.completion_tokens, "cost_usd": cost})
             content = response.choices[0].message.content
